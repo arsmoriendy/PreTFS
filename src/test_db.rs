@@ -16,6 +16,16 @@ mod test {
                 .await
                 .unwrap();
 
+            query("SELECT ino, name FROM file_names")
+                .execute(pool.as_ref())
+                .await
+                .unwrap();
+
+            query("SELECT ino, size, blocks, atime, mtime, ctime, crtime, kind, perm, nlink, uid, gid, rdev, blksize, flags, name FROM readdir_rows")
+                .execute(pool.as_ref())
+                .await
+                .unwrap();
+
             pool.close().await;
         });
     }

@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod test {
-    use sqlx::{migrate, SqlitePool};
+    use sqlx::{migrate, query, SqlitePool};
 
     use crate::*;
 
@@ -8,8 +8,15 @@ mod test {
     fn migrate() {
         let pool = Box::new(SqlitePool::connect_lazy("sqlite::memory:").unwrap());
 
-        task::block_on(migrate!().run(pool.as_ref())).unwrap();
+        task::block_on(async {
+            migrate!().run(pool.as_ref()).await.unwrap();
 
-        task::block_on(pool.close());
+            query("SELECT * FROM file_attrs")
+                .execute(pool.as_ref())
+                .await
+                .unwrap();
+
+            pool.close().await;
+        });
     }
 }

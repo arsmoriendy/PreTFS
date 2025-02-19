@@ -21,25 +21,26 @@ fn to_systime(secs: u64) -> SystemTime {
 }
 
 #[derive(FromRow, Debug)]
-pub struct FileAttrRow {
-    ino: u64,
-    size: u64,
-    blocks: u64,
-    atime: u64,
-    mtime: u64,
-    ctime: u64,
-    crtime: u64,
-    kind: u8,
-    perm: u16,
-    nlink: u32,
-    uid: u32,
-    gid: u32,
-    rdev: u32,
-    blksize: u32,
-    flags: u32,
+pub struct ReadDirRow {
+    pub ino: u64,
+    pub size: u64,
+    pub blocks: u64,
+    pub atime: u64,
+    pub mtime: u64,
+    pub ctime: u64,
+    pub crtime: u64,
+    pub kind: u8,
+    pub perm: u16,
+    pub nlink: u32,
+    pub uid: u32,
+    pub gid: u32,
+    pub rdev: u32,
+    pub blksize: u32,
+    pub flags: u32,
+    pub name: String,
 }
 
-impl TryInto<FileAttr> for &FileAttrRow {
+impl TryInto<FileAttr> for &ReadDirRow {
     type Error = ();
 
     fn try_into(self) -> Result<FileAttr, Self::Error> {

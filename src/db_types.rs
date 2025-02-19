@@ -20,7 +20,7 @@ fn to_systime(secs: u64) -> SystemTime {
     SystemTime::now() + Duration::from_secs(secs)
 }
 
-#[derive(FromRow)]
+#[derive(FromRow, Debug)]
 pub struct FileAttrRow {
     ino: u64,
     size: u64,

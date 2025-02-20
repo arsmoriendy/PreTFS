@@ -1,13 +1,13 @@
-use std::time::{Duration, SystemTime};
-
-use async_std::task;
-use libc::c_int;
-
-use fuser::*;
-use sqlx::{Pool, Sqlite};
-
+mod db_types;
 mod test_db;
 mod test_fs;
+
+use async_std::task;
+use db_types::ReadDirRow;
+use fuser::*;
+use libc::c_int;
+use sqlx::{query_as, Pool, Sqlite};
+use std::time::{Duration, SystemTime};
 
 struct TagFileSystem {
     pool: Box<Pool<Sqlite>>,
@@ -57,5 +57,36 @@ impl Filesystem for TagFileSystem {
                 },
             );
         }
+    }
+
+    fn readdir(
+        &mut self,
+        _req: &Request<'_>,
+        _ino: u64,
+        _fh: u64,
+        offset: i64,
+        mut reply: ReplyDirectory,
+    ) {
+        let res: Vec<ReadDirRow> = task::block_on(
+            query_as("SELECT * FROM readdir_rows WHERE ino >= ?")
+                .bind(offset)
+                .fetch_all(self.pool.as_ref()),
+        )
+        .unwrap();
+
+        for row in res {
+            let row_attr: FileAttr = (&row).try_into().unwrap();
+
+            if reply.add(
+                row_attr.ino,
+                (row_attr.ino + 1) as i64,
+                row_attr.kind,
+                row.name,
+            ) {
+                break;
+            };
+        }
+
+        reply.ok();
     }
 }

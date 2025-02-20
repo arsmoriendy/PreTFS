@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod test {
-    use sqlx::SqlitePool;
+    use sqlx::{migrate, query, SqlitePool};
 
     use crate::*;
 
@@ -52,5 +52,47 @@ mod test {
         let pool = Box::new(SqlitePool::connect_lazy("sqlite::memory:").unwrap());
 
         mount2(TagFileSystem { pool }, stp.monut_path, &[]).unwrap();
+    }
+
+    #[ignore]
+    #[test]
+    fn readdir_interactive() {
+        let stp = Setup::default();
+
+        let pool = Box::new(SqlitePool::connect_lazy("sqlite::memory:").unwrap());
+        task::block_on(migrate!().run(pool.as_ref())).unwrap();
+
+        for i in 2..1000 {
+            task::block_on(async {
+                query("INSERT INTO file_attrs VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
+                    .bind(i) // ino INTEGER PRIMARY KEY,
+                    .bind(0) // size INTEGER,
+                    .bind(0) // blocks INTEGER,
+                    .bind(0) // atime INTEGER,
+                    .bind(0) // mtime INTEGER,
+                    .bind(0) // ctime INTEGER,
+                    .bind(0) // crtime INTEGER,
+                    .bind(4) // kind INTEGER,
+                    .bind(0o777) // perm INTEGER,
+                    .bind(1) // nlink INTEGER,
+                    .bind(1000) // uid INTEGER,
+                    .bind(1000) // gid INTEGER,
+                    .bind(0) // rdev INTEGER,
+                    .bind(0) // blksize INTEGER,
+                    .bind(0) // flags INTEGER,
+                    .execute(pool.as_ref())
+                    .await
+                    .unwrap();
+
+                query("INSERT INTO file_names VALUES(?,?)")
+                    .bind(i)
+                    .bind(format!("filname-{}", i))
+                    .execute(pool.as_ref())
+                    .await
+                    .unwrap()
+            });
+        }
+
+        mount2(TagFileSystem { pool: pool.clone() }, stp.monut_path, &[]).unwrap();
     }
 }

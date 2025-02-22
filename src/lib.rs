@@ -3,7 +3,7 @@ mod test_db;
 mod test_fs;
 
 use async_std::task;
-use db_types::ReadDirRow;
+use db_types::{FileAttrRow, ReadDirRow};
 use fuser::*;
 use libc::c_int;
 use sqlx::{query_as, Pool, Sqlite};
@@ -67,22 +67,18 @@ impl Filesystem for TagFileSystem {
         offset: i64,
         mut reply: ReplyDirectory,
     ) {
-        let res: Vec<ReadDirRow> = task::block_on(
+        // TODO: implement _ino
+        let rows: Vec<ReadDirRow> = task::block_on(
             query_as("SELECT * FROM readdir_rows WHERE ino >= ?")
                 .bind(offset)
                 .fetch_all(self.pool.as_ref()),
         )
         .unwrap();
 
-        for row in res {
-            let row_attr: FileAttr = (&row).try_into().unwrap();
+        for row in rows {
+            let attr: FileAttr = row.attr.into();
 
-            if reply.add(
-                row_attr.ino,
-                (row_attr.ino + 1) as i64,
-                row_attr.kind,
-                row.name,
-            ) {
+            if reply.add(attr.ino, (attr.ino + 1) as i64, attr.kind, row.name) {
                 break;
             };
         }

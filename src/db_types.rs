@@ -3,7 +3,7 @@ use std::time::{Duration, SystemTime};
 use fuser::{FileAttr, FileType};
 use sqlx::FromRow;
 
-fn to_filetype(n: u8) -> Result<FileType, ()> {
+pub fn to_filetype(n: u8) -> Result<FileType, ()> {
     Ok(match n.into() {
         0 => FileType::NamedPipe,
         1 => FileType::CharDevice,
@@ -16,12 +16,12 @@ fn to_filetype(n: u8) -> Result<FileType, ()> {
     })
 }
 
-fn to_systime(secs: u64) -> SystemTime {
+pub fn to_systime(secs: u64) -> SystemTime {
     SystemTime::now() + Duration::from_secs(secs)
 }
 
 #[derive(FromRow, Debug)]
-pub struct ReadDirRow {
+pub struct FileAttrRow {
     pub ino: u64,
     pub size: u64,
     pub blocks: u64,
@@ -37,14 +37,11 @@ pub struct ReadDirRow {
     pub rdev: u32,
     pub blksize: u32,
     pub flags: u32,
-    pub name: String,
 }
 
-impl TryInto<FileAttr> for &ReadDirRow {
-    type Error = ();
-
-    fn try_into(self) -> Result<FileAttr, Self::Error> {
-        return Ok(FileAttr {
+impl Into<FileAttr> for FileAttrRow {
+    fn into(self) -> FileAttr {
+        FileAttr {
             ino: self.ino,
             size: self.size,
             blocks: self.blocks,
@@ -52,7 +49,7 @@ impl TryInto<FileAttr> for &ReadDirRow {
             mtime: to_systime(self.mtime),
             ctime: to_systime(self.ctime),
             crtime: to_systime(self.crtime),
-            kind: to_filetype(self.kind)?,
+            kind: to_filetype(self.kind).unwrap(),
             perm: self.perm,
             nlink: self.nlink,
             uid: self.uid,
@@ -60,6 +57,13 @@ impl TryInto<FileAttr> for &ReadDirRow {
             rdev: self.rdev,
             blksize: self.blksize,
             flags: self.flags,
-        });
+        }
     }
+}
+
+#[derive(FromRow, Debug)]
+pub struct ReadDirRow {
+    #[sqlx(flatten)]
+    pub attr: FileAttrRow,
+    pub name: String,
 }

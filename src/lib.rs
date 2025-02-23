@@ -6,7 +6,7 @@ use async_std::task;
 use db_types::{FileAttrRow, ReadDirRow};
 use fuser::*;
 use libc::c_int;
-use sqlx::{query_as, Pool, Sqlite};
+use sqlx::{query::QueryAs, query_as, sqlite::SqliteArguments, Error, Pool, Sqlite};
 use std::time::{Duration, SystemTime};
 
 struct TagFileSystem {

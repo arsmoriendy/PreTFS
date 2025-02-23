@@ -59,6 +59,30 @@ impl Filesystem for TagFileSystem {
         }
     }
 
+    fn lookup(
+        &mut self,
+        _req: &Request<'_>,
+        parent: u64,
+        name: &std::ffi::OsStr,
+        reply: ReplyEntry,
+    ) {
+        let query: QueryAs<'_, Sqlite, FileAttrRow, SqliteArguments<'_>> = match parent {
+            1 => query_as("SELECT * FROM readdir_rows WHERE name = ?").bind(name.to_str()),
+            _ => todo!(),
+        };
+
+        let res = task::block_on(query.fetch_one(self.pool.as_ref()));
+        match res {
+            Ok(row) => {
+                return reply.entry(&Duration::from_secs(1), &row.into(), 1);
+            }
+            Err(e) => match e {
+                Error::RowNotFound => return reply.error(libc::ENOENT),
+                _ => panic!("{e}"),
+            },
+        }
+    }
+
     fn readdir(
         &mut self,
         _req: &Request<'_>,

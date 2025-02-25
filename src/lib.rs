@@ -13,6 +13,24 @@ struct TagFileSystem {
     pool: Box<Pool<Sqlite>>,
 }
 
+impl TagFileSystem {
+    async fn gen_inode(&self) -> u64 {
+        let last_res: Option<(i64,)> =
+            query_as("SELECT ino FROM file_attrs ORDER BY ino DESC LIMIT 1")
+                .fetch_optional(self.pool.as_ref())
+                .await
+                .unwrap();
+
+        if let Some(last) = last_res {
+            if last.0 >= 2 {
+                return (last.0 + 1) as u64;
+            }
+        }
+
+        return 2;
+    }
+}
+
 impl Filesystem for TagFileSystem {
     fn init(&mut self, _req: &Request<'_>, _config: &mut KernelConfig) -> Result<(), c_int> {
         return Ok(());

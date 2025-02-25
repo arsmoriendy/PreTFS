@@ -63,10 +63,14 @@ mod test {
         let pool = Box::new(SqlitePool::connect_lazy("sqlite::memory:").unwrap());
         task::block_on(migrate!().run(pool.as_ref())).unwrap();
 
-        for i in 2..1000 {
+        let tfs = TagFileSystem { pool };
+
+        for _ in 1..=1000 {
             task::block_on(async {
+                let inode = tfs.gen_inode().await as i64;
+
                 query("INSERT INTO file_attrs VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
-                    .bind(i) // ino INTEGER PRIMARY KEY,
+                    .bind(inode) // ino INTEGER PRIMARY KEY,
                     .bind(0) // size INTEGER,
                     .bind(0) // blocks INTEGER,
                     .bind(0) // atime INTEGER,
@@ -81,19 +85,19 @@ mod test {
                     .bind(0) // rdev INTEGER,
                     .bind(0) // blksize INTEGER,
                     .bind(0) // flags INTEGER,
-                    .execute(pool.as_ref())
+                    .execute(tfs.pool.as_ref())
                     .await
                     .unwrap();
 
                 query("INSERT INTO file_names VALUES(?,?)")
-                    .bind(i)
-                    .bind(format!("filname-{}", i))
-                    .execute(pool.as_ref())
+                    .bind(inode)
+                    .bind(format!("filname-{}", inode))
+                    .execute(tfs.pool.as_ref())
                     .await
                     .unwrap()
             });
         }
 
-        mount2(TagFileSystem { pool: pool.clone() }, stp.monut_path, &[]).unwrap();
+        mount2(tfs, stp.monut_path, &[]).unwrap();
     }
 }

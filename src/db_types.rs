@@ -33,7 +33,7 @@ pub fn from_systime(st: SystemTime) -> u64 {
 }
 
 pub fn to_systime(secs: u64) -> SystemTime {
-    SystemTime::now() + Duration::from_secs(secs)
+    SystemTime::UNIX_EPOCH + Duration::from_secs(secs)
 }
 
 #[derive(FromRow, Debug)]

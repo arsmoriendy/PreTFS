@@ -3,6 +3,18 @@ use std::time::{Duration, SystemTime};
 use fuser::{FileAttr, FileType};
 use sqlx::FromRow;
 
+pub fn from_filetype(ft: FileType) -> u8 {
+    match ft {
+        FileType::NamedPipe => 0,
+        FileType::CharDevice => 1,
+        FileType::BlockDevice => 2,
+        FileType::Directory => 3,
+        FileType::RegularFile => 4,
+        FileType::Symlink => 5,
+        FileType::Socket => 6,
+    }
+}
+
 pub fn to_filetype(n: u8) -> Result<FileType, ()> {
     Ok(match n.into() {
         0 => FileType::NamedPipe,
@@ -14,6 +26,10 @@ pub fn to_filetype(n: u8) -> Result<FileType, ()> {
         6 => FileType::Socket,
         _ => return Err(()),
     })
+}
+
+pub fn from_systime(st: SystemTime) -> u64 {
+    st.duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs()
 }
 
 pub fn to_systime(secs: u64) -> SystemTime {

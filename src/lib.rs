@@ -3,7 +3,7 @@ mod test_db;
 mod test_fs;
 
 use async_std::task;
-use db_types::{FileAttrRow, ReadDirRow};
+use db_types::{from_filetype, from_systime, AssociatedTagsRow, FileAttrRow, ReadDirRow};
 use fuser::*;
 use libc::c_int;
 use sqlx::{query, query::QueryAs, query_as, Error, Pool, Sqlite};
@@ -134,5 +134,137 @@ impl Filesystem for TagFileSystem {
         }
 
         reply.ok();
+    }
+
+    fn mkdir(
+        &mut self,
+        req: &Request<'_>,
+        parent: u64,
+        name: &std::ffi::OsStr,
+        mode: u32,
+        _umask: u32,
+        reply: ReplyEntry,
+    ) {
+        task::block_on(async {
+            // TODO: parent permissions, need impl mountpoint FileAttrs first (for if ino = 1)
+            // TODO: update parent time attrs
+
+            let ino = self.gen_inode().await;
+            let now = SystemTime::now();
+
+            // TODO: size
+            // TODO: figure out perm/mode S_ISUID/S_ISGID/S_ISVTX (inode(7))
+            let f_attrs = FileAttr {
+                ino,
+                size: 0,
+                blocks: 0,
+                atime: now,
+                mtime: now,
+                ctime: now,
+                crtime: now,
+                kind: FileType::Directory,
+                perm: mode as u16,
+                nlink: 1,
+                uid: req.uid(),
+                gid: req.gid(),
+                rdev: 0,
+                blksize: 0,
+                flags: 0,
+            };
+
+            let now_s = from_systime(now);
+
+            query("INSERT INTO file_attrs VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
+                .bind(f_attrs.ino as i64) // ino INTEGER PRIMARY KEY,
+                .bind(f_attrs.size as i64) // size INTEGER,
+                .bind(f_attrs.blocks as i64) // blocks INTEGER,
+                .bind(now_s as i64) // atime INTEGER,
+                .bind(now_s as i64) // mtime INTEGER,
+                .bind(now_s as i64) // ctime INTEGER,
+                .bind(now_s as i64) // crtime INTEGER,
+                .bind(from_filetype(f_attrs.kind)) // kind INTEGER,
+                .bind(f_attrs.perm) // perm INTEGER,
+                .bind(f_attrs.nlink) // nlink INTEGER,
+                .bind(f_attrs.uid) // uid INTEGER,
+                .bind(f_attrs.gid) // gid INTEGER,
+                .bind(f_attrs.rdev) // rdev INTEGER,
+                .bind(f_attrs.blksize) // blksize INTEGER,
+                .bind(f_attrs.flags) // flags INTEGER,
+                .execute(self.pool.as_ref())
+                .await
+                .unwrap();
+
+            query("INSERT INTO file_names VALUES (?, ?)")
+                .bind(ino as i64)
+                .bind(name.to_str())
+                .execute(self.pool.as_ref())
+                .await
+                .unwrap();
+
+            if parent != 1 {
+                // insert into dir_contents
+                if let Err(e) = query("INSERT INTO dir_contents VALUES (?, ?)")
+                    .bind(parent as i64)
+                    .bind(ino as i64)
+                    .execute(self.pool.as_ref())
+                    .await
+                {
+                    todo!("{e}")
+                };
+            }
+
+            // create tag if doesn't exists
+            let tid = match query_as::<_, (u64,)>("SELECT tid FROM tags WHERE name = ?")
+                .bind(name.to_str())
+                .fetch_optional(self.pool.as_ref())
+                .await
+                .unwrap()
+            {
+                Some(tid_row) => tid_row.0,
+                None => {
+                    query_as::<_, (u64,)>("INSERT INTO tags(name) VALUES (?) RETURNING tid")
+                        .bind(name.to_str())
+                        .fetch_one(self.pool.as_ref())
+                        .await
+                        .unwrap()
+                        .0
+                }
+            };
+
+            // associate created directory with the tid above
+            query("INSERT INTO associated_tags VALUES (?, ?)")
+                .bind(tid as i64)
+                .bind(ino as i64)
+                .execute(self.pool.as_ref())
+                .await
+                .unwrap();
+
+            // get parent tags
+            let ptags_res: Result<Vec<AssociatedTagsRow>, Error> =
+                query_as("SELECT * FROM associated_tags WHERE ino = ?")
+                    .bind(parent as i64)
+                    .fetch_all(self.pool.as_ref())
+                    .await;
+
+            let ptags = match ptags_res {
+                Ok(p) => p,
+                Err(e) => match e {
+                    Error::RowNotFound => vec![],
+                    _ => todo!("{e}"),
+                },
+            };
+
+            // associate created directory with parent tags
+            for ptag in ptags {
+                query("INSERT INTO associated_tags VALUES (?, ?)")
+                    .bind(ptag.tid as i64)
+                    .bind(ino as i64)
+                    .execute(self.pool.as_ref())
+                    .await
+                    .unwrap();
+            }
+
+            reply.entry(&Duration::from_secs(1), &f_attrs, 1);
+        });
     }
 }

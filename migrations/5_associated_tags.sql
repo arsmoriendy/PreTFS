@@ -1,0 +1,10 @@
+CREATE TABLE IF NOT EXISTS associated_tags (
+  tid INTEGER,
+  ino INTEGER,
+  FOREIGN KEY (tid) REFERENCES tags(tid)
+    ON DELETE CASCADE
+    ON UPDATE CASCADE,
+  FOREIGN KEY (ino) REFERENCES file_attrs(ino)
+    ON DELETE CASCADE
+    ON UPDATE CASCADE
+);

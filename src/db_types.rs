@@ -83,3 +83,9 @@ pub struct ReadDirRow {
     pub attr: FileAttrRow,
     pub name: String,
 }
+
+#[derive(FromRow, Debug)]
+pub struct AssociatedTagsRow {
+    pub ino: u64,
+    pub tid: u64,
+}

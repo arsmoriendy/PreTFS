@@ -26,6 +26,21 @@ mod test {
                 .await
                 .unwrap();
 
+            query("SELECT tid, name FROM tags")
+                .execute(pool.as_ref())
+                .await
+                .unwrap();
+
+            query("SELECT tid, ino FROM associated_tags")
+                .execute(pool.as_ref())
+                .await
+                .unwrap();
+
+            query("SELECT dir_ino, cnt_ino FROM dir_contents")
+                .execute(pool.as_ref())
+                .await
+                .unwrap();
+
             pool.close().await;
         });
     }

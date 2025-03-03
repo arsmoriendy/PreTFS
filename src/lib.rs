@@ -14,7 +14,7 @@ struct TagFileSystem {
 }
 
 impl TagFileSystem {
-    async fn get_ass_tag(&self, ino: u64) -> Option<Vec<u64>> {
+    async fn get_ass_tags(&self, ino: u64) -> Vec<u64> {
         let ptags_res: Result<Vec<(u64,)>, Error> =
             query_as("SELECT tid FROM associated_tags WHERE ino = ?")
                 .bind(ino as i64)
@@ -22,11 +22,8 @@ impl TagFileSystem {
                 .await;
 
         match ptags_res {
-            Ok(p) => Some(p.iter().map(|r| r.0).collect()),
-            Err(e) => match e {
-                Error::RowNotFound => None,
-                _ => panic!("{e}"),
-            },
+            Ok(p) => p.iter().map(|r| r.0).collect(),
+            Err(e) => panic!("{e}"),
         }
     }
 }
@@ -50,7 +47,6 @@ impl Filesystem for TagFileSystem {
                         size: 0,
                         blocks: 0,
 
-                        // TODO: time related
                         atime: SystemTime::now(),
                         mtime: SystemTime::now(),
                         ctime: SystemTime::now(),
@@ -175,18 +171,15 @@ impl Filesystem for TagFileSystem {
                 .await
                 .unwrap();
 
-            // get parent tags
-            if let Some(ptags) = self.get_ass_tag(parent).await {
-                // associate created directory with parent tags
-                for ptag in ptags {
-                    query("INSERT INTO associated_tags VALUES (?, ?)")
-                        .bind(ptag as i64)
-                        .bind(ino as i64)
-                        .execute(self.pool.as_ref())
-                        .await
-                        .unwrap();
-                }
-            };
+            // associate created directory with parent tags
+            for ptag in self.get_ass_tags(parent).await {
+                query("INSERT INTO associated_tags VALUES (?, ?)")
+                    .bind(ptag as i64)
+                    .bind(ino as i64)
+                    .execute(self.pool.as_ref())
+                    .await
+                    .unwrap();
+            }
 
             reply.entry(&Duration::from_secs(1), &f_attrs, 0);
         });
@@ -306,18 +299,15 @@ impl Filesystem for TagFileSystem {
                 .await
                 .unwrap();
 
-            // get parent tags
-            if let Some(ptags) = self.get_ass_tag(parent).await {
-                // associate created directory with parent tags
-                for ptag in ptags {
-                    query("INSERT INTO associated_tags VALUES (?, ?)")
-                        .bind(ptag as i64)
-                        .bind(ino as i64)
-                        .execute(self.pool.as_ref())
-                        .await
-                        .unwrap();
-                }
-            };
+            // associate created directory with parent tags
+            for ptag in self.get_ass_tags(parent).await {
+                query("INSERT INTO associated_tags VALUES (?, ?)")
+                    .bind(ptag as i64)
+                    .bind(ino as i64)
+                    .execute(self.pool.as_ref())
+                    .await
+                    .unwrap();
+            }
 
             reply.entry(&Duration::from_secs(1), &f_attrs, 1);
         });

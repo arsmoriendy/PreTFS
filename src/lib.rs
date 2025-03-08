@@ -3,10 +3,12 @@ mod test_db;
 mod test_fs;
 
 use async_std::task;
-use db_types::{from_filetype, from_systime, mode_to_filetype, FileAttrRow, ReadDirRow};
+use db_types::{
+    from_filetype, from_systime, mode_to_filetype, to_filetype, FileAttrRow, ReadDirRow,
+};
 use fuser::*;
 use libc::c_int;
-use sqlx::{query, query::QueryAs, query_as, Error, Pool, Sqlite};
+use sqlx::{query, query_as, Error, Pool, QueryBuilder, Sqlite};
 use std::time::{Duration, SystemTime};
 
 struct TagFileSystem {
@@ -99,21 +101,46 @@ impl Filesystem for TagFileSystem {
         name: &std::ffi::OsStr,
         reply: ReplyEntry,
     ) {
-        let query: QueryAs<'_, _, FileAttrRow, _> = match parent {
-            1 => query_as("SELECT * FROM readdir_rows WHERE name = ?").bind(name.to_str()),
-            _ => todo!(),
-        };
+        task::block_on(async {
+            let mut query_builder =
+                QueryBuilder::<Sqlite>::new("SELECT * FROM readdir_rows WHERE (ino IN (");
 
-        let res = task::block_on(query.fetch_one(self.pool.as_ref()));
-        match res {
-            Ok(row) => {
-                return reply.entry(&Duration::from_secs(1), &row.into(), 1);
+            let ptags = self.get_ass_tags(parent).await;
+            for ptag in ptags.iter().enumerate() {
+                query_builder
+                    .push("SELECT ino FROM associated_tags WHERE tid = ")
+                    .push_bind(*ptag.1 as i64);
+                if ptag.0 != ptags.len() - 1 {
+                    query_builder.push(" AND ino IN (");
+                }
             }
-            Err(e) => match e {
-                Error::RowNotFound => return reply.error(libc::ENOENT),
-                _ => panic!("{e}"),
-            },
-        }
+            for _ in ptags.iter().skip(1) {
+                query_builder.push(")");
+            }
+
+            query_builder
+                .push(
+                    ") AND kind != 3 OR ino IN (SELECT cnt_ino FROM dir_contents WHERE dir_ino = ",
+                )
+                .push_bind(parent as i64)
+                .push(")) AND ino != ")
+                .push_bind(parent as i64)
+                .push(" AND name = ")
+                .push_bind(name.to_str());
+
+            match query_builder
+                .build_query_as::<ReadDirRow>()
+                .fetch_optional(self.pool.as_ref())
+                .await
+                .unwrap()
+            {
+                Some(r) => {
+                    let attr: FileAttr = r.attr.into();
+                    reply.entry(&Duration::from_secs(1), &attr, 0);
+                }
+                None => reply.error(libc::ENOENT),
+            };
+        });
     }
 
     fn mknod(
@@ -188,28 +215,63 @@ impl Filesystem for TagFileSystem {
     fn readdir(
         &mut self,
         _req: &Request<'_>,
-        _ino: u64,
+        ino: u64,
         _fh: u64,
         offset: i64,
         mut reply: ReplyDirectory,
     ) {
-        // TODO: implement _ino
-        let rows: Vec<ReadDirRow> = task::block_on(
-            query_as("SELECT * FROM readdir_rows WHERE ino >= ?")
-                .bind(offset)
-                .fetch_all(self.pool.as_ref()),
-        )
-        .unwrap();
+        task::block_on(async {
+            let mut query_builder =
+                QueryBuilder::<Sqlite>::new("SELECT * FROM readdir_rows WHERE (ino IN (");
 
-        for row in rows {
-            let attr: FileAttr = row.attr.into();
+            let ptags = self.get_ass_tags(ino).await;
+            for ptag in ptags.iter().enumerate() {
+                query_builder
+                    .push("SELECT ino FROM associated_tags WHERE tid = ")
+                    .push_bind(*ptag.1 as i64);
+                if ptag.0 != ptags.len() - 1 {
+                    query_builder.push(" AND ino IN (");
+                }
+            }
+            for _ in ptags.iter().skip(1) {
+                query_builder.push(")");
+            }
 
-            if reply.add(attr.ino, (attr.ino + 1) as i64, attr.kind, row.name) {
-                break;
+            query_builder
+                .push(
+                    ") AND kind != 3 OR ino IN (SELECT cnt_ino FROM dir_contents WHERE dir_ino = ",
+                )
+                .push_bind(ino as i64)
+                .push(")) AND ino != ")
+                .push_bind(ino as i64)
+                .push(" ORDER BY ino LIMIT -1 OFFSET ")
+                .push_bind(offset);
+
+            match query_builder
+                .build_query_as::<ReadDirRow>()
+                .fetch_all(self.pool.as_ref())
+                .await
+            {
+                Ok(rows) => {
+                    // println!("{ino}\t{:?}", rows);
+                    for row in rows.iter().enumerate() {
+                        let attr = &row.1.attr;
+                        let name = &row.1.name;
+
+                        if reply.add(
+                            attr.ino,
+                            offset + row.0 as i64 + 1,
+                            to_filetype(attr.kind).unwrap(),
+                            name,
+                        ) {
+                            break;
+                        };
+                    }
+                    reply.ok();
+                }
+                Err(e) => panic!("{e}"),
             };
-        }
-
-        reply.ok();
+        });
     }
 
     fn mkdir(

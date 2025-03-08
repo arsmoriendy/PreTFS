@@ -261,17 +261,14 @@ impl Filesystem for TagFileSystem {
                 .await
                 .unwrap();
 
-            if parent != 1 {
-                // insert into dir_contents
-                if let Err(e) = query("INSERT INTO dir_contents VALUES (?, ?)")
-                    .bind(parent as i64)
-                    .bind(ino as i64)
-                    .execute(self.pool.as_ref())
-                    .await
-                {
-                    todo!("{e}")
-                };
-            }
+            if let Err(e) = query("INSERT INTO dir_contents VALUES (?, ?)")
+                .bind(parent as i64)
+                .bind(ino as i64)
+                .execute(self.pool.as_ref())
+                .await
+            {
+                panic!("{e}")
+            };
 
             // create tag if doesn't exists
             let tid = match query_as::<_, (u64,)>("SELECT tid FROM tags WHERE name = ?")

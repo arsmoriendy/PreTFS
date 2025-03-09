@@ -371,4 +371,80 @@ impl Filesystem for TagFileSystem {
             reply.entry(&Duration::from_secs(1), &f_attrs, 1);
         });
     }
+
+    fn rmdir(
+        &mut self,
+        _req: &Request<'_>,
+        parent: u64,
+        name: &std::ffi::OsStr,
+        reply: ReplyEmpty,
+    ) {
+        task::block_on(async {
+            match  query_as::<_,(i64,)>("SELECT cnt_ino FROM dir_contents INNER JOIN file_names ON file_names.ino = dir_contents.cnt_ino WHERE dir_ino = ? AND name = ?").bind(parent as i64).bind(name.to_str().unwrap()).fetch_optional(self.pool.as_ref()).await.unwrap(){
+                Some(r)=>{
+                    if let Err(e) = query("DELETE FROM file_attrs WHERE ino = ?")
+                        .bind(r.0)
+                        .execute(self.pool.as_ref())
+                        .await
+                    {
+                        panic!("{e}");
+                    };
+
+                },
+                None=>reply.error(libc::ENOENT),
+            };
+        })
+    }
+
+    fn unlink(
+        &mut self,
+        _req: &Request<'_>,
+        parent: u64,
+        name: &std::ffi::OsStr,
+        reply: ReplyEmpty,
+    ) {
+        task::block_on(async {
+            let mut query_builder =
+                QueryBuilder::<Sqlite>::new("SELECT * FROM readdir_rows WHERE (ino IN (");
+
+            let ptags = self.get_ass_tags(parent).await;
+            for ptag in ptags.iter().enumerate() {
+                query_builder
+                    .push("SELECT ino FROM associated_tags WHERE tid = ")
+                    .push_bind(*ptag.1 as i64);
+                if ptag.0 != ptags.len() - 1 {
+                    query_builder.push(" AND ino IN (");
+                }
+            }
+            for _ in ptags.iter().skip(1) {
+                query_builder.push(")");
+            }
+
+            query_builder
+                .push(") OR ino IN (SELECT cnt_ino FROM dir_contents WHERE dir_ino = ")
+                .push_bind(parent as i64)
+                .push(")) AND ino != ")
+                .push_bind(parent as i64)
+                .push(" AND name = ")
+                .push_bind(name.to_str());
+
+            match query_builder
+                .build_query_as::<FileAttrRow>()
+                .fetch_optional(self.pool.as_ref())
+                .await
+                .unwrap()
+            {
+                Some(r) => {
+                    if let Err(e) = query("DELETE FROM file_attrs WHERE ino = ?")
+                        .bind(r.ino as i64)
+                        .execute(self.pool.as_ref())
+                        .await
+                    {
+                        panic!("{e}");
+                    };
+                }
+                None => reply.error(libc::ENOENT),
+            };
+        });
+    }
 }

@@ -21,9 +21,7 @@ mod test {
     impl Default for Setup {
         fn default() -> Self {
             let mount_path = PathBuf::from("mountpoint");
-            if let Err(e) = std::fs::create_dir(&mount_path) {
-                panic!("{e}");
-            }
+            std::fs::create_dir(&mount_path).unwrap();
 
             let db_path = PathBuf::from("tfs_test.sqlite");
             File::create(&db_path).unwrap();
@@ -74,11 +72,7 @@ mod test {
     impl Drop for Setup {
         fn drop(&mut self) {
             self.bg_sess.take().unwrap().join();
-
-            if let Err(e) = std::fs::remove_dir(&self.mount_path) {
-                panic!("{e}");
-            }
-
+            std::fs::remove_dir(&self.mount_path).unwrap();
             remove_file(&self.db_path).unwrap();
         }
     }

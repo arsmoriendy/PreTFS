@@ -293,6 +293,7 @@ impl Filesystem for TagFileSystem<'_> {
                         };
                     }
                     reply.ok();
+                    self.sync_atime(ino).await.unwrap();
                 }
                 Err(e) => panic!("{e}"),
             };

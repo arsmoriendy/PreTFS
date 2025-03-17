@@ -53,15 +53,7 @@ impl TagFileSystem<'_> {
         }
     }
 
-    async fn has_perm(
-        &self,
-        f_uid: u32,
-        f_gid: u32,
-        f_perm: u16,
-        uid: u32,
-        gid: u32,
-        rwx: u16,
-    ) -> bool {
+    fn has_perm(&self, f_uid: u32, f_gid: u32, f_perm: u16, uid: u32, gid: u32, rwx: u16) -> bool {
         if uid == 0 {
             return true;
         }

@@ -53,7 +53,7 @@ impl TagFileSystem<'_> {
         }
     }
 
-    async fn has_access(
+    async fn has_perm(
         &self,
         f_uid: u32,
         f_gid: u32,

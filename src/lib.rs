@@ -81,6 +81,16 @@ impl TagFileSystem<'_> {
 
         return false;
     }
+
+    async fn has_ino_pern(&self, ino: u64, uid: u32, gid: u32, rwx: u16) -> bool {
+        let p_attrs = query_as::<_, FileAttrRow>("SELECT * FROM file_attrs WHERE ino = ?")
+            .bind(ino as i64)
+            .fetch_one(self.pool)
+            .await
+            .unwrap();
+
+        self.has_perm(p_attrs.uid, p_attrs.gid, p_attrs.perm, uid, gid, rwx)
+    }
 }
 
 impl Filesystem for TagFileSystem<'_> {

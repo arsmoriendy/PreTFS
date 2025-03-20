@@ -1,6 +1,5 @@
 mod db_types;
 mod test_db;
-mod test_fs;
 
 use async_std::task;
 use db_types::{
@@ -11,8 +10,8 @@ use libc::c_int;
 use sqlx::{query, query_as, Error, Pool, QueryBuilder, Sqlite};
 use std::time::{Duration, SystemTime};
 
-struct TagFileSystem<'a> {
-    pool: &'a Pool<Sqlite>,
+pub struct TagFileSystem<'a> {
+    pub pool: &'a Pool<Sqlite>,
 }
 
 impl TagFileSystem<'_> {

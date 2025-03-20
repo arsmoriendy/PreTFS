@@ -1,5 +1,5 @@
 #[cfg(test)]
-mod test {
+mod integration_tests {
     use std::{
         fs::{remove_file, File},
         io::{self, Read},
@@ -7,9 +7,10 @@ mod test {
         str::FromStr,
     };
 
-    use sqlx::{migrate, query, sqlite::SqliteConnectOptions, SqlitePool};
-
-    use crate::*;
+    use async_std::task;
+    use fuser::{spawn_mount2, BackgroundSession};
+    use sqlx::{migrate, query, sqlite::SqliteConnectOptions, Pool, Sqlite, SqlitePool};
+    use tfs::TagFileSystem;
 
     struct Setup {
         mount_path: PathBuf,

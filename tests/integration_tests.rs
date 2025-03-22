@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod integration_tests {
     use std::{
-        fs::{remove_file, File},
+        fs::{create_dir, metadata, remove_file, File},
         io::{self, Read},
         path::PathBuf,
         str::FromStr,
@@ -86,5 +86,18 @@ mod integration_tests {
         println!("press enter key to dismount...");
         let mut buf: [u8; 1] = [0];
         io::stdin().read_exact(&mut buf).unwrap();
+    }
+
+    #[test]
+    fn mkdir() {
+        let stp = Setup::default();
+
+        let mut dir_path = stp.mount_path.clone();
+        dir_path.push("foo");
+        create_dir(&dir_path).unwrap();
+
+        let dir_meta = metadata(&dir_path).unwrap();
+
+        assert!(dir_meta.is_dir());
     }
 }

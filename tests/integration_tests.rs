@@ -3,13 +3,14 @@ mod integration_tests {
     use std::{
         fs::{create_dir, metadata, remove_file, File},
         io::{self, Read},
+        os::unix::fs::MetadataExt,
         path::PathBuf,
         str::FromStr,
     };
 
     use async_std::task;
     use fuser::{spawn_mount2, BackgroundSession};
-    use sqlx::{migrate, query, sqlite::SqliteConnectOptions, Pool, Sqlite, SqlitePool};
+    use sqlx::{migrate, query, query_as, sqlite::SqliteConnectOptions, Pool, Sqlite, SqlitePool};
     use tfs::TagFileSystem;
 
     struct Setup {
@@ -90,14 +91,47 @@ mod integration_tests {
 
     #[test]
     fn mkdir() {
-        let stp = Setup::default();
+        task::block_on(async {
+            let stp = Setup::default();
 
-        let mut dir_path = stp.mount_path.clone();
-        dir_path.push("foo");
-        create_dir(&dir_path).unwrap();
+            let dir_name = "foo";
 
-        let dir_meta = metadata(&dir_path).unwrap();
+            let mut dir_path = stp.mount_path.clone();
+            dir_path.push(dir_name);
+            create_dir(&dir_path).unwrap();
 
-        assert!(dir_meta.is_dir());
+            let dir_meta = metadata(&dir_path).unwrap();
+            let tid = query_as::<_, (i64,)>("SELECT tid FROM associated_tags WHERE ino = ?")
+                .bind(dir_meta.ino() as i64)
+                .fetch_one(stp.pool)
+                .await
+                .unwrap()
+                .0;
+
+            assert!(dir_meta.is_dir());
+            assert_eq!(dir_meta.uid(), unsafe { libc::geteuid() });
+            assert_eq!(dir_meta.gid(), unsafe { libc::getegid() });
+            // assert dir name
+            assert!(
+                query_as::<_, (String,)>("SELECT name FROM file_names WHERE ino = ?")
+                    .bind(dir_meta.ino() as i64)
+                    .fetch_one(stp.pool)
+                    .await
+                    .unwrap()
+                    .0
+                    .eq(dir_name)
+            );
+            // assert tag name
+            assert!(
+                query_as::<_, (String,)>("SELECT  name FROM tags WHERE tid = ? AND name = ?",)
+                    .bind(tid)
+                    .bind(dir_name)
+                    .fetch_one(stp.pool)
+                    .await
+                    .unwrap()
+                    .0
+                    .eq(dir_name)
+            );
+        })
     }
 }

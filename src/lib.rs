@@ -229,7 +229,7 @@ impl Filesystem for TagFileSystem<'_> {
             let now = SystemTime::now();
 
             // TODO: figure out perm/mode S_ISUID/S_ISGID/S_ISVTX (inode(7))
-            let f_attrs = FileAttr {
+            let mut f_attrs = FileAttr {
                 ino: 0,
                 size: 0,
                 blocks: 0,
@@ -247,14 +247,14 @@ impl Filesystem for TagFileSystem<'_> {
                 flags: 0,
             };
 
-            let ino: u64 = ins_attrs!(query_as::<_, (u64,)>, f_attrs, "RETURNING ino")
+            f_attrs.ino = ins_attrs!(query_as::<_, (u64,)>, f_attrs, "RETURNING ino")
                 .fetch_one(self.pool)
                 .await
                 .unwrap()
                 .0;
 
             query("INSERT INTO file_names VALUES (?, ?)")
-                .bind(ino as i64)
+                .bind(f_attrs.ino as i64)
                 .bind(name.to_str())
                 .execute(self.pool)
                 .await
@@ -264,7 +264,7 @@ impl Filesystem for TagFileSystem<'_> {
             for ptag in self.get_ass_tags(parent).await {
                 query("INSERT INTO associated_tags VALUES (?, ?)")
                     .bind(ptag as i64)
-                    .bind(ino as i64)
+                    .bind(f_attrs.ino as i64)
                     .execute(self.pool)
                     .await
                     .unwrap();

@@ -23,6 +23,14 @@ impl TagFileSystem<'_> {
             .0
     }
 
+    async fn upd_attrs(&self, ino: u64, attr: &FileAttr) {
+        bind_attrs!(query("UPDATE file_attrs SET size = ?, blocks = ?, atime = ?, mtime = ?, ctime = ?, crtime = ?, kind = ?, perm = ?, nlink = ?, uid = ?, gid = ?, rdev = ?, blksize = ?, flags = ? WHERE ino = ?"), attr)
+            .bind(ino as i64)
+            .execute(self.pool)
+            .await
+            .unwrap();
+    }
+
     async fn get_ass_tags(&self, ino: u64) -> Vec<u64> {
         let ptags_res: Result<Vec<(u64,)>, Error> =
             query_as("SELECT tid FROM associated_tags WHERE ino = ?")
@@ -529,5 +537,62 @@ impl Filesystem for TagFileSystem<'_> {
                 None => reply.error(libc::ENOENT),
             };
         });
+    }
+
+    fn setattr(
+        &mut self,
+        req: &Request<'_>,
+        ino: u64,
+        mode: Option<u32>,
+        uid: Option<u32>,
+        gid: Option<u32>,
+        size: Option<u64>,
+        atime: Option<TimeOrNow>,
+        mtime: Option<TimeOrNow>,
+        ctime: Option<SystemTime>,
+        _fh: Option<u64>,
+        crtime: Option<SystemTime>,
+        _chgtime: Option<SystemTime>,
+        _bkuptime: Option<SystemTime>,
+        flags: Option<u32>,
+        reply: ReplyAttr,
+    ) {
+        task::block_on(async {
+            if !self.has_ino_pern(ino, req.uid(), req.gid(), 0b010).await {
+                return reply.error(libc::EACCES);
+            }
+
+            let mut attr: FileAttr =
+                match query_as::<_, FileAttrRow>("SELECT * FROM file_attrs WHERE ino = $1")
+                    .bind(ino as i64)
+                    .fetch_optional(self.pool)
+                    .await
+                    .unwrap()
+                {
+                    Some(row) => row.into(),
+                    None => return reply.error(libc::ENOENT),
+                };
+
+            attr.size = size.unwrap_or(attr.size);
+            attr.atime = atime.map_or(attr.atime, |tn| match tn {
+                TimeOrNow::Now => SystemTime::now(),
+                TimeOrNow::SpecificTime(t) => t,
+            });
+            attr.mtime = mtime.map_or(attr.mtime, |tn| match tn {
+                TimeOrNow::Now => SystemTime::now(),
+                TimeOrNow::SpecificTime(t) => t,
+            });
+            attr.ctime = ctime.unwrap_or(attr.ctime);
+            attr.crtime = crtime.unwrap_or(attr.crtime);
+            attr.flags = flags.unwrap_or(attr.flags);
+            // TODO: handle change mode filetype case?
+            attr.perm = mode.map_or(attr.perm, |m| m as u16);
+            attr.uid = uid.unwrap_or(attr.uid);
+            attr.gid = gid.unwrap_or(attr.gid);
+
+            self.upd_attrs(attr.ino, &attr).await;
+
+            reply.attr(&Duration::from_secs(1), &attr);
+        })
     }
 }

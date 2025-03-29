@@ -258,11 +258,7 @@ impl Filesystem for TagFileSystem<'_> {
                 flags: 0,
             };
 
-            f_attrs.ino = ins_attrs!(query_as::<_, (u64,)>, f_attrs, "RETURNING ino")
-                .fetch_one(self.pool)
-                .await
-                .unwrap()
-                .0;
+            f_attrs.ino = self.ins_attrs(&f_attrs).await;
 
             query("INSERT INTO file_names VALUES (?, ?)")
                 .bind(f_attrs.ino as i64)

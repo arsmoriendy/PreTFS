@@ -134,4 +134,27 @@ mod integration_tests {
             );
         })
     }
+
+    #[test]
+    fn write() {
+        task::block_on(async {
+            let stp = Setup::default();
+
+            let filepath: PathBuf = [stp.mount_path.to_str().unwrap(), "foo"].iter().collect();
+            let mut file = File::create_new(filepath).unwrap();
+
+            let content = b"lorem ipsum";
+            file.write_all(content).unwrap();
+
+            let db_content =
+                query_as::<_, (Box<[u8]>,)>("SELECT content FROM file_contents WHERE ino = $1")
+                    .bind(file.metadata().unwrap().ino() as i64)
+                    .fetch_one(stp.pool)
+                    .await
+                    .unwrap()
+                    .0;
+
+            assert_eq!(content, db_content.as_ref());
+        })
+    }
 }

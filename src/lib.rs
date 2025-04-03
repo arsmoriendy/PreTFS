@@ -613,6 +613,8 @@ impl Filesystem for TagFileSystem<'_> {
                 return reply.error(libc::EACCES);
             }
 
+            let dat_len = i64::try_from(data.len()).unwrap();
+
             let cnt_len =
                 query_as::<_, (i64,)>("SELECT LENGTH(content) FROM file_contents WHERE ino = $1")
                     .bind(ino as i64)
@@ -636,7 +638,7 @@ impl Filesystem for TagFileSystem<'_> {
             query("INSERT INTO file_contents VALUES ($4, CAST(ZEROBLOB($5) || $2 AS BLOB)) ON CONFLICT(ino) DO UPDATE SET content = CAST(SUBSTR(content, 1, $1) || ZEROBLOB($5) || $2 || SUBSTR(content, $3) AS BLOB) WHERE ino = $4")
                 .bind(offset)
                 .bind(data)
-                .bind(data.len() as i64 + 1 + offset)
+                .bind(offset + 1 + dat_len )
                 .bind(ino as i64)
                 .bind(pad_len.unwrap_or(0))
                 .execute(self.pool)
@@ -648,7 +650,7 @@ impl Filesystem for TagFileSystem<'_> {
                 .await
                 .unwrap();
 
-            reply.written(data.len().try_into().unwrap());
+            reply.written(dat_len.try_into().unwrap());
         });
     }
 

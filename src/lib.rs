@@ -616,7 +616,7 @@ impl Filesystem for TagFileSystem<'_> {
             query("INSERT INTO file_contents VALUES ($4, $2) ON CONFLICT(ino) DO UPDATE SET content = CONCAT(SUBSTR(content, 1, $1), CONCAT($2, SUBSTR(content, $3))) WHERE ino = $4")
                 .bind(offset)
                 .bind(data)
-                .bind(data.len() as i64)
+                .bind(data.len() as i64 + 1 + offset)
                 .bind(ino as i64)
                 .execute(self.pool)
                 .await.unwrap();

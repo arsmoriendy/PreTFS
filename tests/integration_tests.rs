@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod integration_tests {
     use std::{
-        fs::{create_dir, metadata, remove_file, File},
+        fs::{create_dir, metadata, read_to_string, remove_file, File},
         io::{self, Read, Write},
         os::unix::fs::{FileExt, MetadataExt},
         path::{Path, PathBuf},
@@ -179,25 +179,89 @@ mod integration_tests {
     }
 
     #[test]
+    // TODO:
+    // - write with offset new file
+    // - file larger than sql limit
     fn write() {
         task::block_on(async {
             let stp = Setup::default();
 
-            let filepath: PathBuf = [stp.mount_path.to_str().unwrap(), "foo"].iter().collect();
-            let mut file = File::create_new(filepath).unwrap();
+            let dum = fill_dummy(&stp.mount_path, None);
+            let file = dum.file;
 
-            let content = b"lorem ipsum";
-            file.write_all(content).unwrap();
+            let db_content = || {
+                task::block_on(async {
+                    query_as::<_, (Vec<u8>,)>("SELECT content FROM file_contents WHERE ino = $1")
+                        .bind(file.metadata().unwrap().ino() as i64)
+                        .fetch_one(stp.pool)
+                        .await
+                        .unwrap()
+                        .0
+                })
+            };
 
-            let db_content =
-                query_as::<_, (Box<[u8]>,)>("SELECT content FROM file_contents WHERE ino = $1")
-                    .bind(file.metadata().unwrap().ino() as i64)
+            file.write_all_at(b"lorem ipsum", 0).unwrap();
+            assert_eq!(b"lorem ipsum", db_content().as_slice());
+            assert_eq!(file.metadata().unwrap().size(), 11);
+
+            file.write_all_at(b"hello world", 6).unwrap();
+            assert_eq!(b"lorem hello world", db_content().as_slice());
+            assert_eq!(file.metadata().unwrap().size(), 17);
+
+            let offset = 1_000_000;
+            file.write_all_at(b"x", offset).unwrap();
+            assert_eq!(
+                {
+                    let mut v = Vec::from(b"lorem hello world");
+                    v.extend(vec![0u8; offset as usize - 17]);
+                    v.push(b'x');
+                    v
+                },
+                db_content()
+            );
+            assert_eq!(file.metadata().unwrap().size(), offset + 1);
+        })
+    }
+
+    #[test]
+    fn truncate() {
+        task::block_on(async {
+            let stp = Setup::default();
+
+            let full_cnt = b"lorem ipsum";
+            let dum = fill_dummy(&stp.mount_path, Some(full_cnt));
+            let file = dum.file;
+            let ino: i64 = file.metadata().unwrap().ino().try_into().unwrap();
+
+            let resize = 5;
+            file.set_len(resize).unwrap();
+
+            // define variables to assert equal
+            let expected_cnt = &full_cnt[..5];
+
+            let _cnt = read_to_string(dum.file_path).unwrap();
+            let cnt = _cnt.as_bytes();
+            let len: u64 = cnt.len().try_into().unwrap();
+
+            let (db_cnt, db_cnt_len) = query_as::<_, (Vec<u8>, u64)>(
+                "SELECT content, LENGTH(content) FROM file_contents WHERE ino = $1",
+            )
+            .bind(ino)
+            .fetch_one(stp.pool)
+            .await
+            .unwrap();
+
+            let (db_attr_size,) =
+                query_as::<_, (u64,)>("SELECT size FROM file_attrs WHERE ino = $1")
+                    .bind(ino)
                     .fetch_one(stp.pool)
                     .await
-                    .unwrap()
-                    .0;
+                    .unwrap();
 
-            assert_eq!(content, db_content.as_ref());
+            assert_eq!(db_cnt_len, db_attr_size);
+            assert_eq!(db_cnt_len, len);
+            assert_eq!(db_cnt, cnt);
+            assert_eq!(db_cnt, expected_cnt);
         })
     }
 }

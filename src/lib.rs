@@ -694,6 +694,8 @@ impl Filesystem for TagFileSystem<'_> {
                 .await
                 .unwrap();
 
+            self.sync_mtime(ino).await.unwrap();
+
             reply.written(dat_len.try_into().unwrap());
         });
     }

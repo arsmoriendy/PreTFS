@@ -300,9 +300,13 @@ mod integration_tests {
 
             let full_cnt = b"lorem ipsum";
             let dum = fill_dummy(&stp.mount_path, Some(full_cnt));
+            let prev_atime = dum.file.metadata().unwrap().atime();
 
+            sleep(Duration::from_millis(1000));
             let read_cnt = read_to_string(dum.file_path).unwrap();
+            let atime = dum.file.metadata().unwrap().atime();
             assert_eq!(read_cnt.as_bytes(), full_cnt);
+            assert!(atime > prev_atime);
         })
     }
 }

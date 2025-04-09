@@ -731,6 +731,7 @@ impl Filesystem for TagFileSystem<'_> {
             .unwrap()
             .0;
 
+            self.sync_atime(ino).await.unwrap();
             reply.data(Box::leak(data));
         });
     }

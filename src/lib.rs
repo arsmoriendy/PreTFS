@@ -622,7 +622,7 @@ impl Filesystem for TagFileSystem<'_> {
                 TimeOrNow::Now => SystemTime::now(),
                 TimeOrNow::SpecificTime(t) => t,
             });
-            attr.ctime = ctime.unwrap_or(attr.ctime);
+            attr.ctime = ctime.unwrap_or(SystemTime::now());
             attr.crtime = crtime.unwrap_or(attr.crtime);
             attr.flags = flags.unwrap_or(attr.flags);
             // TODO: handle change mode filetype case?

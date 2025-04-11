@@ -7,7 +7,7 @@ mod integration_tests {
         path::{Path, PathBuf},
         str::FromStr,
         thread::sleep,
-        time::Duration,
+        time::{Duration, SystemTime},
     };
 
     use async_std::task;
@@ -307,6 +307,24 @@ mod integration_tests {
             let atime = dum.file.metadata().unwrap().atime();
             assert_eq!(read_cnt.as_bytes(), full_cnt);
             assert!(atime > prev_atime);
+        })
+    }
+
+    #[test]
+    fn setattr() {
+        task::block_on(async {
+            let stp = Setup::default();
+
+            let dum = fill_dummies(&stp.mount_path, None);
+            let file = dum.file;
+
+            let mut meta = file.metadata().unwrap();
+            let prev_ctime = meta.ctime();
+
+            sleep(Duration::from_millis(1000));
+            file.set_modified(SystemTime::now()).unwrap();
+            meta = file.metadata().unwrap();
+            assert!(meta.ctime() > prev_ctime);
         })
     }
 }

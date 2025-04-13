@@ -10,6 +10,9 @@ use libc::c_int;
 use sqlx::{query, query_as, Pool, QueryBuilder, Sqlite};
 use std::time::{Duration, SystemTime};
 
+// libc error code map for database errors
+const EDB: c_int = libc::EIO;
+
 #[derive(Debug)]
 pub struct TagFileSystem<'a> {
     pub pool: &'a Pool<Sqlite>,

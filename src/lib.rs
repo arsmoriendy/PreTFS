@@ -13,6 +13,38 @@ pub struct TagFileSystem<'a> {
 }
 
 impl TagFileSystem<'_> {
+    fn has_perm(f_uid: u32, f_gid: u32, f_perm: u16, uid: u32, gid: u32, rwx: u16) -> bool {
+        if uid == 0 {
+            return true;
+        }
+
+        if f_uid == uid {
+            if f_perm >> 6 & rwx == rwx {
+                return true;
+            }
+
+            return false;
+        }
+
+        if f_gid == gid {
+            if f_perm >> 3 & rwx == rwx {
+                return true;
+            }
+
+            return false;
+        };
+
+        // permission for others
+        if f_perm & rwx == rwx {
+            return true;
+        }
+
+        return false;
+    }
+}
+
+// db helpers
+impl TagFileSystem<'_> {
     async fn ins_attrs(&self, attr: &FileAttr) -> Result<u64, sqlx::Error> {
         Ok(bind_attrs!(query_as::<_, (u64,)>( "INSERT INTO file_attrs VALUES (NULL, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) RETURNING ino"), attr)
             .fetch_one(self.pool)
@@ -58,35 +90,6 @@ impl TagFileSystem<'_> {
         Ok(())
     }
 
-    fn has_perm(&self, f_uid: u32, f_gid: u32, f_perm: u16, uid: u32, gid: u32, rwx: u16) -> bool {
-        if uid == 0 {
-            return true;
-        }
-
-        if f_uid == uid {
-            if f_perm >> 6 & rwx == rwx {
-                return true;
-            }
-
-            return false;
-        }
-
-        if f_gid == gid {
-            if f_perm >> 3 & rwx == rwx {
-                return true;
-            }
-
-            return false;
-        };
-
-        // permission for others
-        if f_perm & rwx == rwx {
-            return true;
-        }
-
-        return false;
-    }
-
     async fn has_ino_perm(
         &self,
         ino: u64,
@@ -99,7 +102,14 @@ impl TagFileSystem<'_> {
             .fetch_one(self.pool)
             .await?;
 
-        Ok(self.has_perm(p_attrs.uid, p_attrs.gid, p_attrs.perm, uid, gid, rwx))
+        Ok(TagFileSystem::has_perm(
+            p_attrs.uid,
+            p_attrs.gid,
+            p_attrs.perm,
+            uid,
+            gid,
+            rwx,
+        ))
     }
 
     async fn req_has_ino_perm(

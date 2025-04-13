@@ -1,7 +1,6 @@
-use std::time::{Duration, SystemTime};
-
 use fuser::{FileAttr, FileType};
 use sqlx::FromRow;
+use std::time::{Duration, SystemTime};
 
 #[macro_export]
 macro_rules! bind_attrs {
@@ -122,10 +121,4 @@ pub struct ReadDirRow {
     #[sqlx(flatten)]
     pub attr: FileAttrRow,
     pub name: String,
-}
-
-#[derive(FromRow, Debug)]
-pub struct AssociatedTagsRow {
-    pub ino: u64,
-    pub tid: u64,
 }

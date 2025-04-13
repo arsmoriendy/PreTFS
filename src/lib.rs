@@ -93,7 +93,7 @@ impl TagFileSystem<'_> {
         return false;
     }
 
-    async fn has_ino_pern(
+    async fn has_ino_perm(
         &self,
         ino: u64,
         uid: u32,
@@ -107,6 +107,33 @@ impl TagFileSystem<'_> {
 
         Ok(self.has_perm(p_attrs.uid, p_attrs.gid, p_attrs.perm, uid, gid, rwx))
     }
+
+    async fn req_has_ino_perm(
+        &self,
+        ino: u64,
+        req: &Request<'_>,
+        rwx: u16,
+    ) -> Result<bool, sqlx::Error> {
+        Ok(self.has_ino_perm(ino, req.uid(), req.gid(), rwx).await?)
+    }
+}
+
+macro_rules! auth_perm {
+    ($self: expr, $ino: expr, $req: expr, $reply: expr, $rwx: expr) => {
+        match $self.req_has_ino_perm($ino, $req, $rwx).await {
+            Ok(has_perm) => {
+                if !has_perm {
+                    $reply.error(libc::EACCES);
+                    return;
+                }
+            }
+            Err(e) => {
+                tracing::error!("{e}");
+                $reply.error(EDB);
+                return;
+            }
+        }
+    };
 }
 
 impl Filesystem for TagFileSystem<'_> {
@@ -181,13 +208,7 @@ impl Filesystem for TagFileSystem<'_> {
         reply: ReplyEntry,
     ) {
         task::block_on(async {
-            if !self
-                .has_ino_pern(parent, req.uid(), req.gid(), 0b100)
-                .await
-                .unwrap()
-            {
-                return reply.error(libc::EACCES);
-            }
+            auth_perm!(self, parent, req, reply, 0b100);
 
             let mut query_builder =
                 QueryBuilder::<Sqlite>::new("SELECT * FROM readdir_rows WHERE (ino IN (");
@@ -242,13 +263,7 @@ impl Filesystem for TagFileSystem<'_> {
         reply: ReplyEntry,
     ) {
         task::block_on(async {
-            if !self
-                .has_ino_pern(parent, req.uid(), req.gid(), 0b010)
-                .await
-                .unwrap()
-            {
-                return reply.error(libc::EACCES);
-            }
+            auth_perm!(self, parent, req, reply, 0b010);
 
             // TODO: handle duplicates
 
@@ -316,13 +331,7 @@ impl Filesystem for TagFileSystem<'_> {
         mut reply: ReplyDirectory,
     ) {
         task::block_on(async {
-            if !self
-                .has_ino_pern(ino, req.uid(), req.gid(), 0b100)
-                .await
-                .unwrap()
-            {
-                return reply.error(libc::EACCES);
-            }
+            auth_perm!(self, ino, req, reply, 0b100);
 
             let mut query_builder =
                 QueryBuilder::<Sqlite>::new("SELECT * FROM readdir_rows WHERE (ino IN (");
@@ -388,13 +397,7 @@ impl Filesystem for TagFileSystem<'_> {
         reply: ReplyEntry,
     ) {
         task::block_on(async {
-            if !self
-                .has_ino_pern(parent, req.uid(), req.gid(), 0b010)
-                .await
-                .unwrap()
-            {
-                return reply.error(libc::EACCES);
-            }
+            auth_perm!(self, parent, req, reply, 0b010);
 
             // TODO: handle duplicates
 
@@ -483,13 +486,7 @@ impl Filesystem for TagFileSystem<'_> {
     #[tracing::instrument]
     fn rmdir(&mut self, req: &Request<'_>, parent: u64, name: &std::ffi::OsStr, reply: ReplyEmpty) {
         task::block_on(async {
-            if !self
-                .has_ino_pern(parent, req.uid(), req.gid(), 0b010)
-                .await
-                .unwrap()
-            {
-                return reply.error(libc::EACCES);
-            }
+            auth_perm!(self, parent, req, reply, 0b010);
 
             match  query_as::<_,(i64,)>("SELECT cnt_ino FROM dir_contents INNER JOIN file_names ON file_names.ino = dir_contents.cnt_ino WHERE dir_ino = ? AND name = ?").bind(parent as i64).bind(name.to_str().unwrap()).fetch_optional(self.pool).await.unwrap(){
                 Some(r)=>{
@@ -517,13 +514,7 @@ impl Filesystem for TagFileSystem<'_> {
         reply: ReplyEmpty,
     ) {
         task::block_on(async {
-            if !self
-                .has_ino_pern(parent, req.uid(), req.gid(), 0b010)
-                .await
-                .unwrap()
-            {
-                return reply.error(libc::EACCES);
-            }
+            auth_perm!(self, parent, req, reply, 0b010);
 
             let mut query_builder =
                 QueryBuilder::<Sqlite>::new("SELECT * FROM readdir_rows WHERE (ino IN (");
@@ -556,13 +547,7 @@ impl Filesystem for TagFileSystem<'_> {
                 .unwrap()
             {
                 Some(r) => {
-                    if !self
-                        .has_ino_pern(r.ino, req.uid(), req.gid(), 0b010)
-                        .await
-                        .unwrap()
-                    {
-                        return reply.error(libc::EACCES);
-                    }
+                    auth_perm!(self, r.ino, req, reply, 0b010);
 
                     if let Err(e) = query("DELETE FROM file_attrs WHERE ino = ?")
                         .bind(r.ino as i64)
@@ -598,13 +583,7 @@ impl Filesystem for TagFileSystem<'_> {
         reply: ReplyAttr,
     ) {
         task::block_on(async {
-            if !self
-                .has_ino_pern(ino, req.uid(), req.gid(), 0b010)
-                .await
-                .unwrap()
-            {
-                return reply.error(libc::EACCES);
-            }
+            auth_perm!(self, ino, req, reply, 0b010);
 
             let mut attr: FileAttr =
                 match query_as::<_, FileAttrRow>("SELECT * FROM file_attrs WHERE ino = $1")
@@ -664,13 +643,7 @@ impl Filesystem for TagFileSystem<'_> {
         reply: ReplyWrite,
     ) {
         task::block_on(async {
-            if !self
-                .has_ino_pern(ino, req.uid(), req.gid(), 0b010)
-                .await
-                .unwrap()
-            {
-                return reply.error(libc::EACCES);
-            }
+            auth_perm!(self, ino, req, reply, 0b010);
 
             let dat_len = i64::try_from(data.len()).unwrap();
 
@@ -728,13 +701,7 @@ impl Filesystem for TagFileSystem<'_> {
         reply: ReplyData,
     ) {
         task::block_on(async {
-            if !self
-                .has_ino_pern(ino, req.uid(), req.gid(), 0b100)
-                .await
-                .unwrap()
-            {
-                return reply.error(libc::EACCES);
-            }
+            auth_perm!(self, ino, req, reply, 0b100);
 
             let data = query_as::<_, (Box<[u8]>,)>(
                 "SELECT SUBSTR(content, $1, $2) FROM file_contents WHERE ino = $3",

@@ -14,20 +14,27 @@ use std::time::{Duration, SystemTime};
 // libc error code map for database errors
 const EDB: c_int = libc::EIO;
 
-macro_rules! auth_perm {
-    ($self: expr, $ino: expr, $req: expr, $reply: expr, $rwx: expr) => {
-        match $self.req_has_ino_perm($ino, $req, $rwx).await {
-            Ok(has_perm) => {
-                if !has_perm {
-                    $reply.error(libc::EACCES);
+macro_rules! handle_db_err {
+    ($e: expr, $reply: expr) => {
+        match $e {
+            Ok(v) => v,
+            Err(e) => match e {
+                _ => {
+                    tracing::error!("{e}");
+                    $reply.error(EDB);
                     return;
                 }
-            }
-            Err(e) => {
-                tracing::error!("{e}");
-                $reply.error(EDB);
-                return;
-            }
+            },
+        }
+    };
+}
+
+macro_rules! auth_perm {
+    ($self: expr, $ino: expr, $req: expr, $reply: expr, $rwx: expr) => {
+        let has_perm = handle_db_err!($self.req_has_ino_perm($ino, $req, $rwx).await, $reply);
+        if !has_perm {
+            $reply.error(libc::EACCES);
+            return;
         }
     };
 }

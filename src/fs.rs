@@ -19,6 +19,10 @@ macro_rules! handle_db_err {
         match $e {
             Ok(v) => v,
             Err(e) => match e {
+                sqlx::Error::RowNotFound => {
+                    $reply.error(libc::ENOENT);
+                    return;
+                }
                 _ => {
                     tracing::error!("{e}");
                     $reply.error(EDB);

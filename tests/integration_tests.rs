@@ -26,7 +26,9 @@ mod integration_tests {
         fn default() -> Self {
             tracing_subscriber::fmt::try_init().ok();
 
-            let mount_path = PathBuf::from("mountpoint");
+            let base_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+
+            let mount_path: PathBuf = [&base_dir, &"mountpoint".into()].iter().collect();
             loop {
                 if let Err(e) = std::fs::create_dir(&mount_path) {
                     if e.kind() == io::ErrorKind::AlreadyExists {
@@ -38,7 +40,7 @@ mod integration_tests {
                 break;
             }
 
-            let db_path = PathBuf::from("tfs_test.sqlite");
+            let db_path: PathBuf = [&base_dir, &"tfs_test.sqlite".into()].iter().collect();
             File::create(&db_path).unwrap();
 
             let pool = task::block_on(async {

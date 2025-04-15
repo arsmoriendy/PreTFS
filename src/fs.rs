@@ -197,26 +197,30 @@ impl Filesystem for TagFileSystem<'_> {
                 flags: 0,
             };
 
-            f_attrs.ino = self.ins_attrs(&f_attrs).await.unwrap();
+            f_attrs.ino = handle_db_err!(self.ins_attrs(&f_attrs).await, reply);
 
-            query("INSERT INTO file_names VALUES (?, ?)")
-                .bind(f_attrs.ino as i64)
-                .bind(name.to_str())
-                .execute(self.pool)
-                .await
-                .unwrap();
+            handle_db_err!(
+                query("INSERT INTO file_names VALUES (?, ?)")
+                    .bind(f_attrs.ino as i64)
+                    .bind(name.to_str())
+                    .execute(self.pool)
+                    .await,
+                reply
+            );
 
             // associate created directory with parent tags
-            for ptag in self.get_ass_tags(parent).await.unwrap() {
-                query("INSERT INTO associated_tags VALUES (?, ?)")
-                    .bind(ptag as i64)
-                    .bind(f_attrs.ino as i64)
-                    .execute(self.pool)
-                    .await
-                    .unwrap();
+            for ptag in handle_db_err!(self.get_ass_tags(parent).await, reply) {
+                handle_db_err!(
+                    query("INSERT INTO associated_tags VALUES (?, ?)")
+                        .bind(ptag as i64)
+                        .bind(f_attrs.ino as i64)
+                        .execute(self.pool)
+                        .await,
+                    reply
+                );
             }
 
-            self.sync_mtime(parent).await.unwrap();
+            handle_db_err!(self.sync_mtime(parent).await, reply);
 
             reply.entry(&Duration::from_secs(1), &f_attrs, 0);
         });

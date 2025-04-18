@@ -329,61 +329,70 @@ impl Filesystem for TagFileSystem<'_> {
                 flags: 0,
             };
 
-            f_attrs.ino = self.ins_attrs(&f_attrs).await.unwrap();
+            f_attrs.ino = handle_db_err!(self.ins_attrs(&f_attrs).await, reply);
 
-            query("INSERT INTO file_names VALUES (?, ?)")
-                .bind(f_attrs.ino as i64)
-                .bind(name.to_str())
-                .execute(self.pool)
-                .await
-                .unwrap();
+            handle_db_err!(
+                query("INSERT INTO file_names VALUES (?, ?)")
+                    .bind(f_attrs.ino as i64)
+                    .bind(name.to_str())
+                    .execute(self.pool)
+                    .await,
+                reply
+            );
 
-            if let Err(e) = query("INSERT INTO dir_contents VALUES (?, ?)")
-                .bind(parent as i64)
-                .bind(f_attrs.ino as i64)
-                .execute(self.pool)
-                .await
-            {
-                panic!("{e}")
-            };
+            handle_db_err!(
+                query("INSERT INTO dir_contents VALUES (?, ?)")
+                    .bind(parent as i64)
+                    .bind(f_attrs.ino as i64)
+                    .execute(self.pool)
+                    .await,
+                reply
+            );
 
             // create tag if doesn't exists
-            let tid = match query_as::<_, (u64,)>("SELECT tid FROM tags WHERE name = ?")
-                .bind(name.to_str())
-                .fetch_optional(self.pool)
-                .await
-                .unwrap()
-            {
+            let tid = match handle_db_err!(
+                query_as::<_, (u64,)>("SELECT tid FROM tags WHERE name = ?")
+                    .bind(name.to_str())
+                    .fetch_optional(self.pool)
+                    .await,
+                reply
+            ) {
                 Some(tid_row) => tid_row.0,
                 None => {
-                    query_as::<_, (u64,)>("INSERT INTO tags(name) VALUES (?) RETURNING tid")
-                        .bind(name.to_str())
-                        .fetch_one(self.pool)
-                        .await
-                        .unwrap()
-                        .0
+                    handle_db_err!(
+                        query_as::<_, (u64,)>("INSERT INTO tags(name) VALUES (?) RETURNING tid")
+                            .bind(name.to_str())
+                            .fetch_one(self.pool)
+                            .await,
+                        reply
+                    )
+                    .0
                 }
             };
 
             // associate created directory with the tid above
-            query("INSERT INTO associated_tags VALUES (?, ?)")
-                .bind(tid as i64)
-                .bind(f_attrs.ino as i64)
-                .execute(self.pool)
-                .await
-                .unwrap();
-
-            // associate created directory with parent tags
-            for ptag in self.get_ass_tags(parent).await.unwrap() {
+            handle_db_err!(
                 query("INSERT INTO associated_tags VALUES (?, ?)")
-                    .bind(ptag as i64)
+                    .bind(tid as i64)
                     .bind(f_attrs.ino as i64)
                     .execute(self.pool)
-                    .await
-                    .unwrap();
+                    .await,
+                reply
+            );
+
+            // associate created directory with parent tags
+            for ptag in handle_db_err!(self.get_ass_tags(parent).await, reply) {
+                handle_db_err!(
+                    query("INSERT INTO associated_tags VALUES (?, ?)")
+                        .bind(ptag as i64)
+                        .bind(f_attrs.ino as i64)
+                        .execute(self.pool)
+                        .await,
+                    reply
+                );
             }
 
-            self.sync_mtime(parent).await.unwrap();
+            handle_db_err!(self.sync_mtime(parent).await, reply);
 
             reply.entry(&Duration::from_secs(1), &f_attrs, 1);
         });

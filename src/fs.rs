@@ -403,20 +403,21 @@ impl Filesystem for TagFileSystem<'_> {
         task::block_on(async {
             auth_perm!(self, parent, req, reply, 0b010);
 
-            match  query_as::<_,(i64,)>("SELECT cnt_ino FROM dir_contents INNER JOIN file_names ON file_names.ino = dir_contents.cnt_ino WHERE dir_ino = ? AND name = ?").bind(parent as i64).bind(name.to_str().unwrap()).fetch_optional(self.pool).await.unwrap(){
-                Some(r)=>{
-                    if let Err(e) = query("DELETE FROM file_attrs WHERE ino = ?")
-                        .bind(r.0)
-                        .execute(self.pool)
-                        .await
-                    {
-                        panic!("{e}");
-                    };
-                    reply.ok();
+            let (ino,) = handle_db_err!(query_as::<_,(i64,)>("SELECT cnt_ino FROM dir_contents INNER JOIN file_names ON file_names.ino = dir_contents.cnt_ino WHERE dir_ino = ? AND name = ?")
+                .bind(parent as i64)
+                .bind(name.to_str().unwrap())
+                .fetch_one(self.pool)
+                .await, reply);
 
-                },
-                None=>reply.error(libc::ENOENT),
-            };
+            handle_db_err!(
+                query("DELETE FROM file_attrs WHERE ino = ?")
+                    .bind(ino)
+                    .execute(self.pool)
+                    .await,
+                reply
+            );
+
+            reply.ok();
         })
     }
 

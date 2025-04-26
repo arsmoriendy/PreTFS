@@ -500,24 +500,22 @@ impl Filesystem for TagFileSystem<'_> {
         task::block_on(async {
             auth_perm!(self, ino, req, reply, 0b010);
 
-            let mut attr: FileAttr =
-                match query_as::<_, FileAttrRow>("SELECT * FROM file_attrs WHERE ino = $1")
+            let mut attr: FileAttr = handle_db_err!(
+                query_as::<_, FileAttrRow>("SELECT * FROM file_attrs WHERE ino = $1")
                     .bind(ino as i64)
-                    .fetch_optional(self.pool)
-                    .await
-                    .unwrap()
-                {
-                    Some(row) => row.into(),
-                    None => return reply.error(libc::ENOENT),
-                };
+                    .fetch_one(self.pool)
+                    .await,
+                reply
+            )
+            .into();
 
             attr.size = match size {
                 Some(s) => {
-                    query("UPDATE file_contents SET content = CAST(SUBSTR(content, 1, $1) AS BLOB) WHERE ino = $2")
+                    handle_db_err!(query("UPDATE file_contents SET content = CAST(SUBSTR(content, 1, $1) AS BLOB) WHERE ino = $2")
                         .bind(s as i64)
                         .bind(ino as i64)
                         .execute(self.pool)
-                        .await.unwrap();
+                        .await, reply);
                     s
                 }
                 None => attr.size,
@@ -538,7 +536,7 @@ impl Filesystem for TagFileSystem<'_> {
             attr.uid = uid.unwrap_or(attr.uid);
             attr.gid = gid.unwrap_or(attr.gid);
 
-            self.upd_attrs(attr.ino, &attr).await.unwrap();
+            handle_db_err!(self.upd_attrs(attr.ino, &attr).await, reply);
 
             reply.attr(&Duration::from_secs(1), &attr);
         })

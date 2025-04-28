@@ -560,12 +560,13 @@ impl Filesystem for TagFileSystem<'_> {
 
             let dat_len = i64::try_from(data.len()).unwrap();
 
-            let cnt_len =
+            let cnt_len = handle_db_err!(
                 query_as::<_, (i64,)>("SELECT LENGTH(content) FROM file_contents WHERE ino = $1")
                     .bind(ino as i64)
                     .fetch_optional(self.pool)
-                    .await
-                    .unwrap();
+                    .await,
+                reply
+            );
 
             let pad_len: Option<i64> = match cnt_len {
                 Some((l,)) => {
@@ -580,22 +581,21 @@ impl Filesystem for TagFileSystem<'_> {
 
             // cast to BLOB because sqlite converts all concat (||) expressions to TEXT
             // https://stackoverflow.com/questions/55301281/update-query-to-append-zeroes-into-blob-field-with-sqlitestudio
-            query("INSERT INTO file_contents VALUES ($4, CAST(ZEROBLOB($5) || $2 AS BLOB)) ON CONFLICT(ino) DO UPDATE SET content = CAST(SUBSTR(content, 1, $1) || ZEROBLOB($5) || $2 || SUBSTR(content, $3) AS BLOB) WHERE ino = $4")
+            handle_db_err!(query("INSERT INTO file_contents VALUES ($4, CAST(ZEROBLOB($5) || $2 AS BLOB)) ON CONFLICT(ino) DO UPDATE SET content = CAST(SUBSTR(content, 1, $1) || ZEROBLOB($5) || $2 || SUBSTR(content, $3) AS BLOB) WHERE ino = $4")
                 .bind(offset)
                 .bind(data)
                 .bind(offset + 1 + dat_len )
                 .bind(ino as i64)
                 .bind(pad_len.unwrap_or(0))
                 .execute(self.pool)
-                .await.unwrap();
+                .await, reply);
 
-            query("UPDATE file_attrs SET size = (SELECT LENGTH(content) FROM file_contents WHERE ino = $1) WHERE ino = $1")
+            handle_db_err!(query("UPDATE file_attrs SET size = (SELECT LENGTH(content) FROM file_contents WHERE ino = $1) WHERE ino = $1")
                 .bind(ino as i64)
                 .execute(self.pool)
-                .await
-                .unwrap();
+                .await, reply);
 
-            self.sync_mtime(ino).await.unwrap();
+            handle_db_err!(self.sync_mtime(ino).await, reply);
 
             reply.written(dat_len.try_into().unwrap());
         });

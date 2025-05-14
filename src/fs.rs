@@ -35,7 +35,7 @@ macro_rules! handle_db_err {
     };
 }
 
-macro_rules! auth_perm {
+macro_rules! handle_auth_perm {
     ($self: expr, $ino: expr, $req: expr, $reply: expr, $rwx: expr) => {
         let has_perm = handle_db_err!($self.req_has_ino_perm($ino, $req, $rwx).await, $reply);
         if !has_perm {
@@ -92,7 +92,7 @@ impl Filesystem for TagFileSystem<'_> {
     #[tracing::instrument]
     fn getattr(&mut self, req: &Request<'_>, ino: u64, _fh: Option<u64>, reply: ReplyAttr) {
         task::block_on(async {
-            auth_perm!(self, ino, req, reply, 0b100);
+            handle_auth_perm!(self, ino, req, reply, 0b100);
 
             let attr_row = handle_db_err!(
                 query_as::<_, FileAttrRow>("SELECT * FROM file_attrs WHERE ino = ?")
@@ -117,7 +117,7 @@ impl Filesystem for TagFileSystem<'_> {
         reply: ReplyEntry,
     ) {
         task::block_on(async {
-            auth_perm!(self, parent, req, reply, 0b100);
+            handle_auth_perm!(self, parent, req, reply, 0b100);
 
             let mut query_builder =
                 QueryBuilder::<Sqlite>::new("SELECT * FROM readdir_rows WHERE (ino IN (");
@@ -169,7 +169,7 @@ impl Filesystem for TagFileSystem<'_> {
         reply: ReplyEntry,
     ) {
         task::block_on(async {
-            auth_perm!(self, parent, req, reply, 0b010);
+            handle_auth_perm!(self, parent, req, reply, 0b010);
 
             // TODO: handle duplicates
 
@@ -241,7 +241,7 @@ impl Filesystem for TagFileSystem<'_> {
         mut reply: ReplyDirectory,
     ) {
         task::block_on(async {
-            auth_perm!(self, ino, req, reply, 0b100);
+            handle_auth_perm!(self, ino, req, reply, 0b100);
 
             let mut query_builder =
                 QueryBuilder::<Sqlite>::new("SELECT * FROM readdir_rows WHERE (ino IN (");
@@ -302,7 +302,7 @@ impl Filesystem for TagFileSystem<'_> {
         reply: ReplyEntry,
     ) {
         task::block_on(async {
-            auth_perm!(self, parent, req, reply, 0b010);
+            handle_auth_perm!(self, parent, req, reply, 0b010);
 
             // TODO: handle duplicates
 
@@ -400,7 +400,7 @@ impl Filesystem for TagFileSystem<'_> {
     #[tracing::instrument]
     fn rmdir(&mut self, req: &Request<'_>, parent: u64, name: &std::ffi::OsStr, reply: ReplyEmpty) {
         task::block_on(async {
-            auth_perm!(self, parent, req, reply, 0b010);
+            handle_auth_perm!(self, parent, req, reply, 0b010);
 
             let (ino,) = handle_db_err!(query_as::<_,(i64,)>("SELECT cnt_ino FROM dir_contents INNER JOIN file_names ON file_names.ino = dir_contents.cnt_ino WHERE dir_ino = ? AND name = ?")
                 .bind(parent as i64)
@@ -429,7 +429,7 @@ impl Filesystem for TagFileSystem<'_> {
         reply: ReplyEmpty,
     ) {
         task::block_on(async {
-            auth_perm!(self, parent, req, reply, 0b010);
+            handle_auth_perm!(self, parent, req, reply, 0b010);
 
             let mut query_builder =
                 QueryBuilder::<Sqlite>::new("SELECT * FROM readdir_rows WHERE (ino IN (");
@@ -463,7 +463,7 @@ impl Filesystem for TagFileSystem<'_> {
                 reply
             );
 
-            auth_perm!(self, f_attrs.ino, req, reply, 0b010);
+            handle_auth_perm!(self, f_attrs.ino, req, reply, 0b010);
 
             handle_db_err!(
                 query("DELETE FROM file_attrs WHERE ino = ?")
@@ -497,7 +497,7 @@ impl Filesystem for TagFileSystem<'_> {
         reply: ReplyAttr,
     ) {
         task::block_on(async {
-            auth_perm!(self, ino, req, reply, 0b010);
+            handle_auth_perm!(self, ino, req, reply, 0b010);
 
             let row = handle_db_err!(
                 query_as::<_, FileAttrRow>("SELECT * FROM file_attrs WHERE ino = $1")
@@ -556,7 +556,7 @@ impl Filesystem for TagFileSystem<'_> {
         reply: ReplyWrite,
     ) {
         task::block_on(async {
-            auth_perm!(self, ino, req, reply, 0b010);
+            handle_auth_perm!(self, ino, req, reply, 0b010);
 
             let dat_len = i64::try_from(data.len()).unwrap();
 
@@ -614,7 +614,7 @@ impl Filesystem for TagFileSystem<'_> {
         reply: ReplyData,
     ) {
         task::block_on(async {
-            auth_perm!(self, ino, req, reply, 0b100);
+            handle_auth_perm!(self, ino, req, reply, 0b100);
 
             let data = handle_db_err!(
                 query_as::<_, (Box<[u8]>,)>(

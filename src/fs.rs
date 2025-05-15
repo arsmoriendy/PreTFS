@@ -131,7 +131,7 @@ impl Filesystem for TagFileSystem<'_> {
                 reply
             );
 
-            let attr = handle_db_err!(FileAttr::try_from(attr_row), reply);
+            let attr = handle_db_err!(FileAttr::try_from(&attr_row), reply);
 
             reply.attr(&Duration::from_secs(1), &attr);
         });
@@ -181,7 +181,7 @@ impl Filesystem for TagFileSystem<'_> {
                     .await,
                 reply
             );
-            let attr = handle_db_err!(FileAttr::try_from(row.attr), reply);
+            let attr = handle_db_err!(FileAttr::try_from(&row.attr), reply);
             reply.entry(&Duration::from_secs(1), &attr, 0);
         });
     }
@@ -536,7 +536,7 @@ impl Filesystem for TagFileSystem<'_> {
                 reply
             );
 
-            let mut attr: FileAttr = handle_db_err!(FileAttr::try_from(row), reply).into();
+            let mut attr: FileAttr = handle_db_err!(FileAttr::try_from(&row), reply).into();
 
             attr.size = match size {
                 Some(s) => {

@@ -164,10 +164,10 @@ pub struct FileAttrRow {
     pub flags: u32,
 }
 
-impl TryFrom<FileAttrRow> for FileAttr {
+impl TryFrom<&FileAttrRow> for FileAttr {
     type Error = ConvError;
 
-    fn try_from(value: FileAttrRow) -> Result<Self, Self::Error> {
+    fn try_from(value: &FileAttrRow) -> Result<Self, Self::Error> {
         Ok(FileAttr {
             ino: value.ino,
             size: value.size,

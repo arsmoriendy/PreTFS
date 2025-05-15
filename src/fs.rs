@@ -10,6 +10,7 @@ use fuser::*;
 use libc::c_int;
 use sqlx::{query, query_as, QueryBuilder, Sqlite};
 use std::{
+    i64,
     num::TryFromIntError,
     time::{Duration, SystemTime},
 };
@@ -30,6 +31,12 @@ macro_rules! handle_from_int_err {
                 return;
             }
         }
+    };
+}
+
+macro_rules! to_i64 {
+    ($e: expr, $reply: expr) => {
+        handle_from_int_err!(i64::try_from($e), $reply)
     };
 }
 
@@ -118,7 +125,7 @@ impl Filesystem for TagFileSystem<'_> {
 
             let attr_row = handle_db_err!(
                 query_as::<_, FileAttrRow>("SELECT * FROM file_attrs WHERE ino = ?")
-                    .bind(ino as i64)
+                    .bind(to_i64!(ino, reply))
                     .fetch_one(self.pool)
                     .await,
                 reply
@@ -161,9 +168,9 @@ impl Filesystem for TagFileSystem<'_> {
                 .push(
                     ") AND kind != 3 OR ino IN (SELECT cnt_ino FROM dir_contents WHERE dir_ino = ",
                 )
-                .push_bind(parent as i64)
+                .push_bind(to_i64!(parent, reply))
                 .push(")) AND ino != ")
-                .push_bind(parent as i64)
+                .push_bind(to_i64!(parent, reply))
                 .push(" AND name = ")
                 .push_bind(name.to_str());
 
@@ -228,7 +235,7 @@ impl Filesystem for TagFileSystem<'_> {
 
             handle_db_err!(
                 query("INSERT INTO file_names VALUES (?, ?)")
-                    .bind(f_attrs.ino as i64)
+                    .bind(to_i64!(f_attrs.ino, reply))
                     .bind(name.to_str())
                     .execute(self.pool)
                     .await,
@@ -239,8 +246,8 @@ impl Filesystem for TagFileSystem<'_> {
             for ptag in handle_db_err!(self.get_ass_tags(parent).await, reply) {
                 handle_db_err!(
                     query("INSERT INTO associated_tags VALUES (?, ?)")
-                        .bind(ptag as i64)
-                        .bind(f_attrs.ino as i64)
+                        .bind(to_i64!(ptag, reply))
+                        .bind(to_i64!(f_attrs.ino, reply))
                         .execute(self.pool)
                         .await,
                     reply
@@ -272,7 +279,7 @@ impl Filesystem for TagFileSystem<'_> {
             for ptag in ptags.iter().enumerate() {
                 query_builder
                     .push("SELECT ino FROM associated_tags WHERE tid = ")
-                    .push_bind(*ptag.1 as i64);
+                    .push_bind(to_i64!(*ptag.1, reply));
                 if ptag.0 != ptags.len() - 1 {
                     query_builder.push(" AND ino IN (");
                 }
@@ -285,9 +292,9 @@ impl Filesystem for TagFileSystem<'_> {
                 .push(
                     ") AND kind != 3 OR ino IN (SELECT cnt_ino FROM dir_contents WHERE dir_ino = ",
                 )
-                .push_bind(ino as i64)
+                .push_bind(to_i64!(ino, reply))
                 .push(")) AND ino != ")
-                .push_bind(ino as i64)
+                .push_bind(to_i64!(ino, reply))
                 .push(" ORDER BY ino LIMIT -1 OFFSET ")
                 .push_bind(offset);
 
@@ -304,7 +311,7 @@ impl Filesystem for TagFileSystem<'_> {
                 let name = &row.1.name;
                 let ftyp = handle_db_err!(to_filetype(attr.kind), reply);
 
-                if reply.add(attr.ino, offset + row.0 as i64 + 1, ftyp, name) {
+                if reply.add(attr.ino, offset + to_i64!(row.0, reply) + 1, ftyp, name) {
                     break;
                 };
             }
@@ -354,7 +361,7 @@ impl Filesystem for TagFileSystem<'_> {
 
             handle_db_err!(
                 query("INSERT INTO file_names VALUES (?, ?)")
-                    .bind(f_attrs.ino as i64)
+                    .bind(to_i64!(f_attrs.ino, reply))
                     .bind(name.to_str())
                     .execute(self.pool)
                     .await,
@@ -363,8 +370,8 @@ impl Filesystem for TagFileSystem<'_> {
 
             handle_db_err!(
                 query("INSERT INTO dir_contents VALUES (?, ?)")
-                    .bind(parent as i64)
-                    .bind(f_attrs.ino as i64)
+                    .bind(to_i64!(parent, reply))
+                    .bind(to_i64!(f_attrs.ino, reply))
                     .execute(self.pool)
                     .await,
                 reply
@@ -394,8 +401,8 @@ impl Filesystem for TagFileSystem<'_> {
             // associate created directory with the tid above
             handle_db_err!(
                 query("INSERT INTO associated_tags VALUES (?, ?)")
-                    .bind(tid as i64)
-                    .bind(f_attrs.ino as i64)
+                    .bind(to_i64!(tid, reply))
+                    .bind(to_i64!(f_attrs.ino, reply))
                     .execute(self.pool)
                     .await,
                 reply
@@ -405,8 +412,8 @@ impl Filesystem for TagFileSystem<'_> {
             for ptag in handle_db_err!(self.get_ass_tags(parent).await, reply) {
                 handle_db_err!(
                     query("INSERT INTO associated_tags VALUES (?, ?)")
-                        .bind(ptag as i64)
-                        .bind(f_attrs.ino as i64)
+                        .bind(to_i64!(ptag, reply))
+                        .bind(to_i64!(f_attrs.ino, reply))
                         .execute(self.pool)
                         .await,
                     reply
@@ -425,7 +432,7 @@ impl Filesystem for TagFileSystem<'_> {
             handle_auth_perm!(self, parent, req, reply, 0b010);
 
             let (ino,) = handle_db_err!(query_as::<_,(i64,)>("SELECT cnt_ino FROM dir_contents INNER JOIN file_names ON file_names.ino = dir_contents.cnt_ino WHERE dir_ino = ? AND name = ?")
-                .bind(parent as i64)
+                .bind(to_i64!(parent,reply))
                 .bind(name.to_str().unwrap())
                 .fetch_one(self.pool)
                 .await, reply);
@@ -460,7 +467,7 @@ impl Filesystem for TagFileSystem<'_> {
             for ptag in ptags.iter().enumerate() {
                 query_builder
                     .push("SELECT ino FROM associated_tags WHERE tid = ")
-                    .push_bind(*ptag.1 as i64);
+                    .push_bind(to_i64!(*ptag.1, reply));
                 if ptag.0 != ptags.len() - 1 {
                     query_builder.push(" AND ino IN (");
                 }
@@ -471,9 +478,9 @@ impl Filesystem for TagFileSystem<'_> {
 
             query_builder
                 .push(") OR ino IN (SELECT cnt_ino FROM dir_contents WHERE dir_ino = ")
-                .push_bind(parent as i64)
+                .push_bind(to_i64!(parent, reply))
                 .push(")) AND ino != ")
-                .push_bind(parent as i64)
+                .push_bind(to_i64!(parent, reply))
                 .push(" AND name = ")
                 .push_bind(name.to_str());
 
@@ -489,7 +496,7 @@ impl Filesystem for TagFileSystem<'_> {
 
             handle_db_err!(
                 query("DELETE FROM file_attrs WHERE ino = ?")
-                    .bind(f_attrs.ino as i64)
+                    .bind(to_i64!(f_attrs.ino, reply))
                     .execute(self.pool)
                     .await,
                 reply
@@ -523,7 +530,7 @@ impl Filesystem for TagFileSystem<'_> {
 
             let row = handle_db_err!(
                 query_as::<_, FileAttrRow>("SELECT * FROM file_attrs WHERE ino = $1")
-                    .bind(ino as i64)
+                    .bind(to_i64!(ino, reply))
                     .fetch_one(self.pool)
                     .await,
                 reply
@@ -534,8 +541,8 @@ impl Filesystem for TagFileSystem<'_> {
             attr.size = match size {
                 Some(s) => {
                     handle_db_err!(query("UPDATE file_contents SET content = CAST(SUBSTR(content, 1, $1) AS BLOB) WHERE ino = $2")
-                        .bind(s as i64)
-                        .bind(ino as i64)
+                        .bind(to_i64!(s,reply))
+                        .bind(to_i64!(ino,reply))
                         .execute(self.pool)
                         .await, reply);
                     s
@@ -584,7 +591,7 @@ impl Filesystem for TagFileSystem<'_> {
 
             let cnt_len = handle_db_err!(
                 query_as::<_, (i64,)>("SELECT LENGTH(content) FROM file_contents WHERE ino = $1")
-                    .bind(ino as i64)
+                    .bind(to_i64!(ino, reply))
                     .fetch_optional(self.pool)
                     .await,
                 reply
@@ -607,13 +614,13 @@ impl Filesystem for TagFileSystem<'_> {
                 .bind(offset)
                 .bind(data)
                 .bind(offset + 1 + dat_len )
-                .bind(ino as i64)
+                .bind(to_i64!(ino,reply))
                 .bind(pad_len.unwrap_or(0))
                 .execute(self.pool)
                 .await, reply);
 
             handle_db_err!(query("UPDATE file_attrs SET size = (SELECT LENGTH(content) FROM file_contents WHERE ino = $1) WHERE ino = $1")
-                .bind(ino as i64)
+                .bind(to_i64!(ino,reply))
                 .execute(self.pool)
                 .await, reply);
 
@@ -644,7 +651,7 @@ impl Filesystem for TagFileSystem<'_> {
                 )
                 .bind(offset)
                 .bind(size)
-                .bind(ino as i64)
+                .bind(to_i64!(ino, reply))
                 .fetch_one(self.pool)
                 .await,
                 reply

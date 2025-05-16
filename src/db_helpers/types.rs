@@ -90,10 +90,17 @@ impl From<sqlx::Error> for DBError {
         DBError::SQLX(value)
     }
 }
+
 pub enum ConvError {
     U8ToFiletype,
     ModeToFiletype,
     SystemTimeToU64(SystemTimeError),
+}
+
+impl From<SystemTimeError> for ConvError {
+    fn from(value: SystemTimeError) -> Self {
+        ConvError::SystemTimeToU64(value)
+    }
 }
 
 pub fn from_filetype(ft: FileType) -> u8 {
@@ -135,10 +142,7 @@ pub fn mode_to_filetype(mut mode: u32) -> Result<FileType, ConvError> {
 }
 
 pub fn from_systime(st: SystemTime) -> Result<u64, ConvError> {
-    Ok(st
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .map_err(|e| ConvError::SystemTimeToU64(e))?
-        .as_secs())
+    Ok(st.duration_since(SystemTime::UNIX_EPOCH)?.as_secs())
 }
 
 pub fn to_systime(secs: u64) -> SystemTime {

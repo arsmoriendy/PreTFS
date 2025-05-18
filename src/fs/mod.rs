@@ -1,9 +1,11 @@
+#[macro_use]
+mod macros;
 use crate::{
     db_helpers::{
         try_bind_attrs,
         types::{mode_to_filetype, to_filetype, FileAttrRow, ReadDirRow},
     },
-    handle_auth_perm, handle_db_err, handle_from_int_err, to_i64, TagFileSystem,
+    handle_db_err, handle_from_int_err, TagFileSystem,
 };
 use async_std::task;
 use fuser::*;

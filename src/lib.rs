@@ -7,44 +7,15 @@ use db_helpers::{
 };
 use fuser::{FileAttr, Request};
 use libc::c_int;
-use sqlx::{query, query_as, Pool, Sqlite};
+use sqlx::{query, query_as, Database, Pool, Sqlite};
 use std::{num::TryFromIntError, time::SystemTime};
 
 #[derive(Debug)]
-pub struct TagFileSystem<'a> {
-    pub pool: &'a Pool<Sqlite>,
+pub struct TagFileSystem<'a, DB: Database> {
+    pub pool: &'a Pool<DB>,
 }
 
-impl TagFileSystem<'_> {
-    fn has_perm(f_uid: u32, f_gid: u32, f_perm: u16, uid: u32, gid: u32, rwx: u16) -> bool {
-        if uid == 0 {
-            return true;
-        }
-
-        if f_uid == uid {
-            if f_perm >> 6 & rwx == rwx {
-                return true;
-            }
-
-            return false;
-        }
-
-        if f_gid == gid {
-            if f_perm >> 3 & rwx == rwx {
-                return true;
-            }
-
-            return false;
-        };
-
-        // permission for others
-        if f_perm & rwx == rwx {
-            return true;
-        }
-
-        return false;
-    }
-
+impl TagFileSystem<'_, Sqlite> {
     async fn ins_attrs(&self, attr: &FileAttr) -> Result<u64, DBError> {
         let q = query_as::<_, (u64,)>( "INSERT INTO file_attrs VALUES (NULL, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15) RETURNING ino");
         Ok(try_bind_attrs(q, attr)?
@@ -90,22 +61,6 @@ impl TagFileSystem<'_> {
         Ok(())
     }
 
-    async fn has_ino_perm(&self, ino: u64, uid: u32, gid: u32, rwx: u16) -> Result<bool, DBError> {
-        let p_attrs = query_as::<_, FileAttrRow>("SELECT * FROM file_attrs WHERE ino = ?")
-            .bind(i64::try_from(ino)?)
-            .fetch_one(self.pool)
-            .await?;
-
-        Ok(TagFileSystem::has_perm(
-            p_attrs.uid,
-            p_attrs.gid,
-            p_attrs.perm,
-            uid,
-            gid,
-            rwx,
-        ))
-    }
-
     async fn req_has_ino_perm(
         &self,
         ino: u64,
@@ -114,6 +69,51 @@ impl TagFileSystem<'_> {
     ) -> Result<bool, DBError> {
         Ok(self.has_ino_perm(ino, req.uid(), req.gid(), rwx).await?)
     }
+
+    async fn has_ino_perm(&self, ino: u64, uid: u32, gid: u32, rwx: u16) -> Result<bool, DBError> {
+        let p_attrs = query_as::<_, FileAttrRow>("SELECT * FROM file_attrs WHERE ino = ?")
+            .bind(i64::try_from(ino)?)
+            .fetch_one(self.pool)
+            .await?;
+
+        Ok(has_perm(
+            p_attrs.uid,
+            p_attrs.gid,
+            p_attrs.perm,
+            uid,
+            gid,
+            rwx,
+        ))
+    }
+}
+
+fn has_perm(f_uid: u32, f_gid: u32, f_perm: u16, uid: u32, gid: u32, rwx: u16) -> bool {
+    if uid == 0 {
+        return true;
+    }
+
+    if f_uid == uid {
+        if f_perm >> 6 & rwx == rwx {
+            return true;
+        }
+
+        return false;
+    }
+
+    if f_gid == gid {
+        if f_perm >> 3 & rwx == rwx {
+            return true;
+        }
+
+        return false;
+    };
+
+    // permission for others
+    if f_perm & rwx == rwx {
+        return true;
+    }
+
+    return false;
 }
 
 fn handle_from_int_err<T>(expr: Result<T, TryFromIntError>) -> Result<T, c_int> {

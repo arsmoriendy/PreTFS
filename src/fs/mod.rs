@@ -16,7 +16,7 @@ use std::{
     time::{Duration, SystemTime},
 };
 
-impl Filesystem for TagFileSystem<'_> {
+impl Filesystem for TagFileSystem<'_, Sqlite> {
     #[tracing::instrument]
     fn init(&mut self, req: &Request<'_>, _config: &mut KernelConfig) -> Result<(), c_int> {
         task::block_on(async {

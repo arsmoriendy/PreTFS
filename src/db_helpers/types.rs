@@ -4,7 +4,10 @@ use sqlx::{
     query::{Query, QueryAs},
     Database, Encode, FromRow, Type,
 };
-use std::time::{Duration, SystemTime, SystemTimeError};
+use std::{
+    num::TryFromIntError,
+    time::{Duration, SystemTime, SystemTimeError},
+};
 
 pub trait Bindable<'q, DB: Database, Q> {
     /// Bind for a general `Bindable` type
@@ -91,15 +94,34 @@ impl From<sqlx::Error> for DBError {
     }
 }
 
+impl From<SystemTimeError> for DBError {
+    fn from(value: SystemTimeError) -> Self {
+        DBError::Conv(ConvError::SystemTimeToU64(value))
+    }
+}
+
+impl From<TryFromIntError> for DBError {
+    fn from(value: TryFromIntError) -> Self {
+        DBError::Conv(ConvError::ToI64(value))
+    }
+}
+
 pub enum ConvError {
     U8ToFiletype,
     ModeToFiletype,
     SystemTimeToU64(SystemTimeError),
+    ToI64(TryFromIntError),
 }
 
 impl From<SystemTimeError> for ConvError {
     fn from(value: SystemTimeError) -> Self {
         ConvError::SystemTimeToU64(value)
+    }
+}
+
+impl From<TryFromIntError> for ConvError {
+    fn from(value: TryFromIntError) -> Self {
+        ConvError::ToI64(value)
     }
 }
 

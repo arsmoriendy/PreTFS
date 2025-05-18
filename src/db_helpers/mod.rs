@@ -11,13 +11,13 @@ where
     B: Bindable<'q, Sqlite, Q>,
 {
     Ok(
-        b.gbind(a.ino as i64) // ino INTEGER
-            .gbind(a.size as i64) // size INTEGER,
-            .gbind(a.blocks as i64) // blocks INTEGER,
-            .gbind(from_systime(a.atime)? as i64) // atime INTEGER,
-            .gbind(from_systime(a.mtime)? as i64) // mtime INTEGER,
-            .gbind(from_systime(a.ctime)? as i64) // ctime INTEGER,
-            .gbind(from_systime(a.crtime)? as i64) // crtime INTEGER,
+        b.gbind(i64::try_from(a.ino)?) // ino INTEGER
+            .gbind(i64::try_from(a.size)?) // size INTEGER,
+            .gbind(i64::try_from(a.blocks)?) // blocks INTEGER,
+            .gbind(i64::try_from(from_systime(a.atime)?)?) // atime INTEGER,
+            .gbind(i64::try_from(from_systime(a.mtime)?)?) // mtime INTEGER,
+            .gbind(i64::try_from(from_systime(a.ctime)?)?) // ctime INTEGER,
+            .gbind(i64::try_from(from_systime(a.crtime)?)?) // crtime INTEGER,
             .gbind(from_filetype(a.kind)) // kind INTEGER,
             .gbind(a.perm) // perm INTEGER,
             .gbind(a.nlink) // nlink INTEGER,
@@ -46,10 +46,10 @@ impl TagFileSystem<'_> {
         Ok(())
     }
 
-    pub async fn get_ass_tags(&self, ino: u64) -> Result<Vec<u64>, sqlx::Error> {
+    pub async fn get_ass_tags(&self, ino: u64) -> Result<Vec<u64>, DBError> {
         Ok(
             query_as::<_, (u64,)>("SELECT tid FROM associated_tags WHERE ino = ?")
-                .bind(ino as i64)
+                .bind(i64::try_from(ino)?)
                 .fetch_all(self.pool)
                 .await?
                 .iter()
@@ -60,8 +60,8 @@ impl TagFileSystem<'_> {
 
     pub async fn sync_mtime(&self, ino: u64) -> Result<(), DBError> {
         query("UPDATE file_attrs SET mtime = ? WHERE ino = ?")
-            .bind(from_systime(SystemTime::now())? as i64)
-            .bind(ino as i64)
+            .bind(i64::try_from(from_systime(SystemTime::now())?)?)
+            .bind(i64::try_from(ino)?)
             .execute(self.pool)
             .await?;
         Ok(())
@@ -69,22 +69,16 @@ impl TagFileSystem<'_> {
 
     pub async fn sync_atime(&self, ino: u64) -> Result<(), DBError> {
         query("UPDATE file_attrs SET atime = ? WHERE ino = ?")
-            .bind(from_systime(SystemTime::now())? as i64)
-            .bind(ino as i64)
+            .bind(i64::try_from(from_systime(SystemTime::now())?)?)
+            .bind(i64::try_from(ino)?)
             .execute(self.pool)
             .await?;
         Ok(())
     }
 
-    async fn has_ino_perm(
-        &self,
-        ino: u64,
-        uid: u32,
-        gid: u32,
-        rwx: u16,
-    ) -> Result<bool, sqlx::Error> {
+    async fn has_ino_perm(&self, ino: u64, uid: u32, gid: u32, rwx: u16) -> Result<bool, DBError> {
         let p_attrs = query_as::<_, FileAttrRow>("SELECT * FROM file_attrs WHERE ino = ?")
-            .bind(ino as i64)
+            .bind(i64::try_from(ino)?)
             .fetch_one(self.pool)
             .await?;
 
@@ -103,7 +97,7 @@ impl TagFileSystem<'_> {
         ino: u64,
         req: &Request<'_>,
         rwx: u16,
-    ) -> Result<bool, sqlx::Error> {
+    ) -> Result<bool, DBError> {
         Ok(self.has_ino_perm(ino, req.uid(), req.gid(), rwx).await?)
     }
 }

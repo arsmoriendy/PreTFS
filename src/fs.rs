@@ -526,7 +526,7 @@ impl Filesystem for TagFileSystem<'_, Sqlite> {
         task::block_on(async {
             handle_auth_perm!(self, ino, req, reply, 0b010);
 
-            let dat_len = i64::try_from(data.len()).unwrap();
+            let data_len = to_i64!(data.len(), reply);
 
             let cnt_len = handle_db_err!(
                 query_scalar::<_, i64>("SELECT LENGTH(content) FROM file_contents WHERE ino = $1")
@@ -552,7 +552,7 @@ impl Filesystem for TagFileSystem<'_, Sqlite> {
             handle_db_err!(query("INSERT INTO file_contents VALUES ($4, CAST(ZEROBLOB($5) || $2 AS BLOB)) ON CONFLICT(ino) DO UPDATE SET content = CAST(SUBSTR(content, 1, $1) || ZEROBLOB($5) || $2 || SUBSTR(content, $3) AS BLOB) WHERE ino = $4")
                 .bind(offset)
                 .bind(data)
-                .bind(offset + 1 + dat_len )
+                .bind(offset + 1 + data_len )
                 .bind(to_i64!(ino,reply))
                 .bind(pad_len.unwrap_or(0))
                 .execute(self.pool)
@@ -565,7 +565,8 @@ impl Filesystem for TagFileSystem<'_, Sqlite> {
 
             handle_db_err!(self.sync_mtime(ino).await, reply);
 
-            reply.written(dat_len.try_into().unwrap());
+            let dat_len_32 = handle_from_int_err!(u32::try_from(data_len), reply);
+            reply.written(dat_len_32);
         });
     }
 

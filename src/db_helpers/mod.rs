@@ -1,8 +1,8 @@
 pub mod types;
 
 use fuser::FileAttr;
-use sqlx::Sqlite;
-use types::{from_filetype, from_systime, Bindable, ConvError};
+use sqlx::{QueryBuilder, Sqlite};
+use types::{from_filetype, from_systime, Bindable, ConvError, DBError};
 
 pub fn try_bind_attrs<'q, Q, B>(b: B, a: &FileAttr) -> Result<Q, ConvError>
 where
@@ -26,4 +26,20 @@ where
             .gbind(a.flags)
             .inner(), // flags INTEGER,
     )
+}
+
+/// Chain `qb` with a `SELECT` query of inodes that has been tagged with all of `tags`
+pub fn chain_tagged_inos(qb: &mut QueryBuilder<Sqlite>, tags: Vec<u64>) -> Result<(), DBError> {
+    for t in tags.iter().enumerate() {
+        qb.push("SELECT ino FROM associated_tags WHERE tid = ")
+            .push_bind(i64::try_from(*t.1)?);
+        if t.0 != tags.len() - 1 {
+            qb.push(" AND ino IN (");
+        }
+    }
+    for _ in tags.iter().skip(1) {
+        qb.push(")");
+    }
+
+    Ok(())
 }

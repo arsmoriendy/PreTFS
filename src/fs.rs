@@ -1,6 +1,6 @@
 use crate::{
     db_helpers::{
-        try_bind_attrs,
+        chain_tagged_inos, try_bind_attrs,
         types::{mode_to_filetype, to_filetype, FileAttrRow, ReadDirRow},
     },
     handle_db_err, handle_from_int_err, TagFileSystem,
@@ -92,17 +92,7 @@ impl Filesystem for TagFileSystem<'_, Sqlite> {
                 QueryBuilder::<Sqlite>::new("SELECT * FROM readdir_rows WHERE (ino IN (");
 
             let ptags = handle_db_err!(self.get_ass_tags(parent).await, reply);
-            for ptag in ptags.iter().enumerate() {
-                query_builder
-                    .push("SELECT ino FROM associated_tags WHERE tid = ")
-                    .push_bind(to_i64!(*ptag.1, reply));
-                if ptag.0 != ptags.len() - 1 {
-                    query_builder.push(" AND ino IN (");
-                }
-            }
-            for _ in ptags.iter().skip(1) {
-                query_builder.push(")");
-            }
+            handle_db_err!(chain_tagged_inos(&mut query_builder, ptags), reply);
 
             query_builder
                 .push(
@@ -216,17 +206,7 @@ impl Filesystem for TagFileSystem<'_, Sqlite> {
                 QueryBuilder::<Sqlite>::new("SELECT * FROM readdir_rows WHERE (ino IN (");
 
             let ptags = handle_db_err!(self.get_ass_tags(ino).await, reply);
-            for ptag in ptags.iter().enumerate() {
-                query_builder
-                    .push("SELECT ino FROM associated_tags WHERE tid = ")
-                    .push_bind(to_i64!(*ptag.1, reply));
-                if ptag.0 != ptags.len() - 1 {
-                    query_builder.push(" AND ino IN (");
-                }
-            }
-            for _ in ptags.iter().skip(1) {
-                query_builder.push(")");
-            }
+            handle_db_err!(chain_tagged_inos(&mut query_builder, ptags), reply);
 
             query_builder
                 .push(
@@ -403,17 +383,7 @@ impl Filesystem for TagFileSystem<'_, Sqlite> {
                 QueryBuilder::<Sqlite>::new("SELECT * FROM readdir_rows WHERE (ino IN (");
 
             let ptags = handle_db_err!(self.get_ass_tags(parent).await, reply);
-            for ptag in ptags.iter().enumerate() {
-                query_builder
-                    .push("SELECT ino FROM associated_tags WHERE tid = ")
-                    .push_bind(to_i64!(*ptag.1, reply));
-                if ptag.0 != ptags.len() - 1 {
-                    query_builder.push(" AND ino IN (");
-                }
-            }
-            for _ in ptags.iter().skip(1) {
-                query_builder.push(")");
-            }
+            handle_db_err!(chain_tagged_inos(&mut query_builder, ptags), reply);
 
             query_builder
                 .push(") OR ino IN (SELECT cnt_ino FROM dir_contents WHERE dir_ino = ")

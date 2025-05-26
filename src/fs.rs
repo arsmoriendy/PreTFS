@@ -565,4 +565,208 @@ impl Filesystem for TagFileSystem<'_, Sqlite> {
             reply.data(Box::leak(data));
         });
     }
+
+    #[tracing::instrument]
+    fn rename(
+        &mut self,
+        req: &Request<'_>,
+        parent: u64,
+        name: &std::ffi::OsStr,
+        newparent: u64,
+        newname: &std::ffi::OsStr,
+        _flags: u32, // TODO: what is this for?
+        reply: ReplyEmpty,
+    ) {
+        task::block_on(async {
+            // check permissions on each parents
+            handle_auth_perm!(self, parent, req, reply, 0b100);
+            handle_auth_perm!(self, newparent, req, reply, 0b010);
+
+            // get file attributes
+            let mut query_builder =
+                QueryBuilder::<Sqlite>::new("SELECT ino, kind FROM readdir_rows WHERE (ino IN (");
+            let parent_tags = handle_db_err!(self.get_ass_tags(parent).await, reply);
+            handle_db_err!(chain_tagged_inos(&mut query_builder, &parent_tags), reply);
+            query_builder.push(") OR ino IN (SELECT cnt_ino FROM dir_contents WHERE dir_ino = ?)");
+            query_builder.push(") AND name = ? LIMIT 2");
+
+            let q = query_builder
+                .build_query_as::<(u64, u64)>()
+                .bind(to_i64!(parent, reply))
+                .bind(name.to_str());
+
+            let rows = handle_db_err!(q.fetch_all(self.pool).await, reply);
+            if rows.len() != 1 {
+                if rows.len() > 1 {
+                    tracing::error!("found duplicates")
+                }
+                reply.error(libc::ENOENT);
+                return;
+            }
+
+            let (ino, kind) = rows[0];
+
+            let filetype = handle_db_err!(
+                to_filetype(handle_from_int_err!(u8::try_from(kind), reply)),
+                reply
+            );
+
+            // check write permission on file
+            handle_auth_perm!(self, ino, req, reply, 0b010);
+
+            match filetype {
+                FileType::Directory => {
+                    // get children baesd on old tags
+                    let old_tags = handle_db_err!(self.get_ass_tags(ino).await, reply);
+                    let mut query_builder =
+                        QueryBuilder::<Sqlite>::new("SELECT ino FROM file_attrs WHERE ino IN (");
+                    handle_db_err!(chain_tagged_inos(&mut query_builder, &old_tags), reply);
+                    query_builder
+                        .push(") OR ino IN (SELECT cnt_ino FROM dir_contents WHERE dir_ino = ?)");
+                    let children = handle_db_err!(
+                        query_builder
+                            .build_query_scalar::<u64>()
+                            .bind(to_i64!(ino, reply))
+                            .fetch_all(self.pool)
+                            .await,
+                        reply
+                    );
+
+                    // remove all children associations
+                    for child_ino in &children {
+                        handle_db_err!(
+                            query("DELETE FROM associated_tags WHERE tid = $1")
+                                .bind(to_i64!(*child_ino, reply))
+                                .execute(self.pool)
+                                .await,
+                            reply
+                        );
+                    }
+
+                    // remove all directory's associations
+                    handle_db_err!(
+                        query("DELETE from associated_tags WHERE ino = $1")
+                            .bind(to_i64!(ino, reply))
+                            .execute(self.pool)
+                            .await,
+                        reply
+                    );
+
+                    // associate directory with newparent's tags
+                    let new_tags = handle_db_err!(self.get_ass_tags(newparent).await, reply);
+                    for new_tid in new_tags {
+                        handle_db_err!(
+                            query("INSERT INTO associated_tags (ino, tid) VALUES ($1, $2)")
+                                .bind(to_i64!(ino, reply))
+                                .bind(to_i64!(new_tid, reply))
+                                .execute(self.pool)
+                                .await,
+                            reply
+                        );
+                    }
+
+                    // create new tag with the directory's new name if it doesn't yet exist
+                    let new_tid = match handle_db_err!(
+                        query_scalar::<_, u64>("SELECT tid FROM tags WHERE name = $1")
+                            .bind(newname.to_str())
+                            .fetch_optional(self.pool)
+                            .await,
+                        reply
+                    ) {
+                        Some(tid_row) => tid_row,
+                        None => {
+                            handle_db_err!(
+                                query_scalar::<_, u64>(
+                                    "INSERT INTO tags (name) VALUES ($1) RETURNING tid"
+                                )
+                                .bind(newname.to_str())
+                                .fetch_one(self.pool)
+                                .await,
+                                reply
+                            )
+                        }
+                    };
+
+                    // associate children with the tag with the new directory's name
+                    for child_ino in &children {
+                        handle_db_err!(
+                            query("INSERT INTO associated_tags (tid, ino) VALUES ($1, $2)")
+                                .bind(to_i64!(new_tid, reply))
+                                .bind(to_i64!(*child_ino, reply))
+                                .execute(self.pool)
+                                .await,
+                            reply
+                        );
+                    }
+
+                    // delete entire tag if there are no other associations
+                    let old_tid = handle_db_err!(
+                        query_scalar::<_, u64>("SELECT tid FROM tags WHERE name = $1")
+                            .bind(name.to_str())
+                            .fetch_one(self.pool)
+                            .await,
+                        reply
+                    );
+                    let associated_old_tags_count = handle_db_err!(
+                        query_scalar::<_, u64>(
+                            "SELECT COUNT(*) FROM associated_tags WHERE tid = $1"
+                        )
+                        .bind(to_i64!(old_tid, reply))
+                        .fetch_one(self.pool)
+                        .await,
+                        reply
+                    );
+                    if associated_old_tags_count == 0 {
+                        handle_db_err!(
+                            query("DELETE FROM tags WHERE tid = $1")
+                                .bind(to_i64!(old_tid, reply))
+                                .execute(self.pool)
+                                .await,
+                            reply
+                        );
+                    }
+                }
+                FileType::RegularFile => {
+                    // remove all file's associations
+                    handle_db_err!(
+                        query("DELETE from associated_tags WHERE ino = $1")
+                            .bind(to_i64!(ino, reply))
+                            .execute(self.pool)
+                            .await,
+                        reply
+                    );
+
+                    // associate file with newparent's tags
+                    let new_tags = handle_db_err!(self.get_ass_tags(newparent).await, reply);
+                    for new_tid in new_tags {
+                        handle_db_err!(
+                            query("INSERT INTO associated_tags (ino, tid) VALUES ($1, $2)")
+                                .bind(to_i64!(ino, reply))
+                                .bind(to_i64!(new_tid, reply))
+                                .execute(self.pool)
+                                .await,
+                            reply
+                        );
+                    }
+                }
+                _ => {
+                    tracing::error!("tfs currently only supports regular files and directories");
+                    reply.error(libc::ENOSYS);
+                    return;
+                }
+            }
+
+            // update file_names table
+            handle_db_err!(
+                query("UPDATE file_names SET name = $1 WHERE ino = $2")
+                    .bind(newname.to_str())
+                    .bind(to_i64!(ino, reply))
+                    .execute(self.pool)
+                    .await,
+                reply
+            );
+
+            reply.ok();
+        })
+    }
 }

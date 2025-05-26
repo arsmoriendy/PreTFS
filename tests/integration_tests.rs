@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod integration_tests {
     use std::{
-        fs::{create_dir, metadata, read_to_string, remove_file, File},
+        fs::{self, create_dir, metadata, read_to_string, remove_file, File},
         io::{self, Read, Write},
         os::unix::fs::{FileExt, MetadataExt},
         path::{Path, PathBuf},
@@ -326,6 +326,80 @@ mod integration_tests {
             file.set_modified(SystemTime::now()).unwrap();
             meta = file.metadata().unwrap();
             assert!(meta.ctime() > prev_ctime);
+        })
+    }
+
+    #[test]
+    fn rename_file() {
+        task::block_on(async {
+            let stp = Setup::default();
+
+            let dir1_path = crt_dummy_dir(&stp.mount_path, Some(Path::new("dir1")));
+            let dir2_path = crt_dummy_dir(&stp.mount_path, Some(Path::new("dir2")));
+
+            let (child_path, child) = crt_dummy_file(&dir1_path, Some(Path::new("child")));
+            let child_ino = child.metadata().unwrap().ino();
+
+            let mut new_child_path = dir2_path.clone();
+            new_child_path.push("new_child");
+
+            fs::rename(&child_path, &new_child_path).unwrap();
+
+            let new_child_ino = File::open(&new_child_path)
+                .unwrap()
+                .metadata()
+                .unwrap()
+                .ino();
+            assert_eq!(child_ino, new_child_ino);
+
+            let expected_err = File::open(&child_path).unwrap_err();
+            assert_eq!(expected_err.kind(), std::io::ErrorKind::NotFound)
+        })
+    }
+
+    #[test]
+    fn rename_dir() {
+        task::block_on(async {
+            let stp = Setup::default();
+
+            let dir1_path = crt_dummy_dir(&stp.mount_path, Some(Path::new("dir1")));
+            let dir2_path = crt_dummy_dir(&stp.mount_path, Some(Path::new("dir2")));
+            let inner_dir_path = crt_dummy_dir(&dir1_path, Some(Path::new("inner_dir")));
+            let inner_dir_ino = File::open(&inner_dir_path)
+                .unwrap()
+                .metadata()
+                .unwrap()
+                .ino();
+
+            let (child_path, child) = crt_dummy_file(&inner_dir_path, Some(Path::new("child")));
+            let child_ino = child.metadata().unwrap().ino();
+
+            let mut new_inner_dir_path = dir2_path.clone();
+            new_inner_dir_path.push("new_inner_dir");
+
+            fs::rename(&inner_dir_path, &new_inner_dir_path).unwrap();
+
+            let new_inner_dir_ino = File::open(&new_inner_dir_path)
+                .unwrap()
+                .metadata()
+                .unwrap()
+                .ino();
+            assert_eq!(inner_dir_ino, new_inner_dir_ino);
+
+            let mut new_child_path = new_inner_dir_path.clone();
+            new_child_path.push("child");
+            let new_child_ino = File::open(&new_child_path)
+                .unwrap()
+                .metadata()
+                .unwrap()
+                .ino();
+            assert_eq!(child_ino, new_child_ino);
+
+            let expected_err = File::open(&child_path).unwrap_err();
+            assert_eq!(expected_err.kind(), std::io::ErrorKind::NotFound);
+
+            let expected_err = File::open(&inner_dir_path).unwrap_err();
+            assert_eq!(expected_err.kind(), std::io::ErrorKind::NotFound);
         })
     }
 }

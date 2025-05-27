@@ -635,7 +635,7 @@ impl Filesystem for TagFileSystem<'_, Sqlite> {
                     // remove all children associations
                     for child_ino in &children {
                         handle_db_err!(
-                            query("DELETE FROM associated_tags WHERE tid = $1")
+                            query("DELETE FROM associated_tags WHERE ino = $1")
                                 .bind(to_i64!(*child_ino, reply))
                                 .execute(self.pool)
                                 .await,

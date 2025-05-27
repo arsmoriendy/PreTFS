@@ -740,6 +740,26 @@ impl Filesystem for TagFileSystem<'_, Sqlite> {
                             reply
                         );
                     }
+
+                    // remove directory from parent
+                    handle_db_err!(
+                        query("DELETE FROM dir_contents WHERE cnt_ino = $1 AND dir_ino = $2")
+                            .bind(to_i64!(ino, reply))
+                            .bind(to_i64!(parent, reply))
+                            .execute(self.pool)
+                            .await,
+                        reply
+                    );
+
+                    // add directory to new parent
+                    handle_db_err!(
+                        query("INSERT INTO dir_contents (cnt_ino, dir_ino) VALUES ($1, $2)")
+                            .bind(to_i64!(ino, reply))
+                            .bind(to_i64!(newparent, reply))
+                            .execute(self.pool)
+                            .await,
+                        reply
+                    );
                 }
                 FileType::RegularFile => {
                     // remove all file's associations

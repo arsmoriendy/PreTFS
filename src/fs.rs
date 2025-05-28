@@ -9,10 +9,7 @@ use async_std::task;
 use fuser::*;
 use libc::c_int;
 use sqlx::{query, query_as, query_scalar, QueryBuilder, Sqlite};
-use std::{
-    i64,
-    time::{Duration, SystemTime},
-};
+use std::time::{Duration, SystemTime};
 
 impl Filesystem for TagFileSystem<'_, Sqlite> {
     #[tracing::instrument]

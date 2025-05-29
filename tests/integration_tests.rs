@@ -26,11 +26,10 @@ mod integration_tests {
         bg_sess: Option<BackgroundSession>,
     }
 
-    impl Default for Setup {
-        fn default() -> Self {
+    impl Setup {
+        fn new(mount_path: PathBuf, db_path: PathBuf) -> Self {
             tracing_subscriber::fmt::try_init().ok();
 
-            let mount_path: PathBuf = [BASE_DIR, "mountpoint"].iter().collect();
             loop {
                 if let Err(e) = std::fs::create_dir(&mount_path) {
                     if e.kind() == io::ErrorKind::AlreadyExists {
@@ -42,7 +41,6 @@ mod integration_tests {
                 break;
             }
 
-            let db_path: PathBuf = [BASE_DIR, "tfs_test.sqlite"].iter().collect();
             File::create(&db_path).unwrap();
 
             let pool = task::block_on(async {
@@ -85,6 +83,19 @@ mod integration_tests {
                 pool,
                 bg_sess: Some(bg_sess),
             }
+        }
+
+        fn new_with(mount_path: Option<PathBuf>, db_path: Option<PathBuf>) -> Self {
+            Self::new(
+                mount_path.unwrap_or([BASE_DIR, "mountpoint"].iter().collect()),
+                db_path.unwrap_or([BASE_DIR, "tfs_test.sqlite"].iter().collect()),
+            )
+        }
+    }
+
+    impl Default for Setup {
+        fn default() -> Self {
+            Setup::new_with(None, None)
         }
     }
 

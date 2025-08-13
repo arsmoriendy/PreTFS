@@ -12,10 +12,10 @@
     in
     {
       devShells."x86_64-linux".default = pkgs.mkShell {
-        packages = [
-          pkgs.rustup
-          pkgs.pkg-config
-          pkgs.fuse3
+        packages = with pkgs; [
+          rustup
+          pkg-config
+          fuse3
         ];
         # LIBRARY_PATH = "${pkgs.lib.makeLibraryPath [ pkgs.fuse3 ]}";
         # C_INCLUDE_PATH = "${pkgs.lib.makeIncludePath [

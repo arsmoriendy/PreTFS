@@ -128,7 +128,7 @@ where
     expr.map_err(|e| {
         let db_err: DBError = e.into();
         let (code, s) = db_err.map_db_err();
-        tracing::error!(s);
+        tracing::error!("{s}");
         code
     })
 }

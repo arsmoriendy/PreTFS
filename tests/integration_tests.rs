@@ -41,7 +41,7 @@ mod integration_tests {
                 break;
             }
 
-            File::create(&db_path).unwrap();
+            File::create_new(&db_path).unwrap();
 
             let pool = task::block_on(async {
                 let pool: &'static Pool<Sqlite> = Box::leak(Box::new(

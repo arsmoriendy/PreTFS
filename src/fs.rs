@@ -5,7 +5,6 @@ use crate::{
     },
     handle_db_err, handle_from_int_err, TagFileSystem,
 };
-use async_std::task;
 use fuser::*;
 use libc::c_int;
 use sqlx::{query, query_as, query_scalar, QueryBuilder, Sqlite};
@@ -14,7 +13,7 @@ use std::time::{Duration, SystemTime};
 impl Filesystem for TagFileSystem<'_, Sqlite> {
     #[tracing::instrument]
     fn init(&mut self, req: &Request<'_>, _config: &mut KernelConfig) -> Result<(), c_int> {
-        task::block_on(async {
+        self.rt.block_on(async {
             // create mountpoint attr if not exist
             let q = handle_db_err(try_bind_attrs(
                 query("INSERT OR IGNORE INTO file_attrs VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)"),
@@ -52,12 +51,13 @@ impl Filesystem for TagFileSystem<'_, Sqlite> {
 
     #[tracing::instrument]
     fn destroy(&mut self) {
-        task::block_on(self.pool.close());
+        // TODO: delete shm and wal files
+        self.rt.block_on(async { self.pool.close().await });
     }
 
     #[tracing::instrument]
     fn getattr(&mut self, req: &Request<'_>, ino: u64, _fh: Option<u64>, reply: ReplyAttr) {
-        task::block_on(async {
+        self.rt.block_on(async {
             handle_auth_perm!(self, ino, req, reply, 0b100);
 
             let attr_row = handle_db_err!(
@@ -82,7 +82,7 @@ impl Filesystem for TagFileSystem<'_, Sqlite> {
         name: &std::ffi::OsStr,
         reply: ReplyEntry,
     ) {
-        task::block_on(async {
+        self.rt.block_on(async {
             handle_auth_perm!(self, parent, req, reply, 0b100);
 
             let mut query_builder =
@@ -122,7 +122,7 @@ impl Filesystem for TagFileSystem<'_, Sqlite> {
         _rdev: u32,
         reply: ReplyEntry,
     ) {
-        task::block_on(async {
+        self.rt.block_on(async {
             handle_auth_perm!(self, parent, req, reply, 0b010);
 
             // TODO: handle duplicates
@@ -194,7 +194,7 @@ impl Filesystem for TagFileSystem<'_, Sqlite> {
         offset: i64,
         mut reply: ReplyDirectory,
     ) {
-        task::block_on(async {
+        self.rt.block_on(async {
             handle_auth_perm!(self, ino, req, reply, 0b100);
 
             let mut query_builder =
@@ -243,7 +243,7 @@ impl Filesystem for TagFileSystem<'_, Sqlite> {
         _umask: u32,
         reply: ReplyEntry,
     ) {
-        task::block_on(async {
+        self.rt.block_on(async {
             handle_auth_perm!(self, parent, req, reply, 0b010);
 
             // TODO: handle duplicates
@@ -340,7 +340,7 @@ impl Filesystem for TagFileSystem<'_, Sqlite> {
 
     #[tracing::instrument]
     fn rmdir(&mut self, req: &Request<'_>, parent: u64, name: &std::ffi::OsStr, reply: ReplyEmpty) {
-        task::block_on(async {
+        self.rt.block_on(async {
             handle_auth_perm!(self, parent, req, reply, 0b010);
 
             let ino = handle_db_err!(query_scalar::<_,i64>("SELECT cnt_ino FROM dir_contents INNER JOIN file_names ON file_names.ino = dir_contents.cnt_ino WHERE dir_ino = ? AND name = ?")
@@ -369,7 +369,7 @@ impl Filesystem for TagFileSystem<'_, Sqlite> {
         name: &std::ffi::OsStr,
         reply: ReplyEmpty,
     ) {
-        task::block_on(async {
+        self.rt.block_on(async {
             handle_auth_perm!(self, parent, req, reply, 0b010);
 
             let mut query_builder =
@@ -425,7 +425,7 @@ impl Filesystem for TagFileSystem<'_, Sqlite> {
         flags: Option<u32>,
         reply: ReplyAttr,
     ) {
-        task::block_on(async {
+        self.rt.block_on(async {
             handle_auth_perm!(self, ino, req, reply, 0b010);
 
             let row = handle_db_err!(
@@ -484,7 +484,7 @@ impl Filesystem for TagFileSystem<'_, Sqlite> {
         _lock_owner: Option<u64>,
         reply: ReplyWrite,
     ) {
-        task::block_on(async {
+        self.rt.block_on(async {
             handle_auth_perm!(self, ino, req, reply, 0b010);
 
             let data_len = to_i64!(data.len(), reply);
@@ -543,7 +543,7 @@ impl Filesystem for TagFileSystem<'_, Sqlite> {
         _lock_owner: Option<u64>,
         reply: ReplyData,
     ) {
-        task::block_on(async {
+        self.rt.block_on(async {
             handle_auth_perm!(self, ino, req, reply, 0b100);
 
             let data = handle_db_err!(
@@ -574,7 +574,7 @@ impl Filesystem for TagFileSystem<'_, Sqlite> {
         _flags: u32, // TODO: what is this for?
         reply: ReplyEmpty,
     ) {
-        task::block_on(async {
+        self.rt.block_on(async {
             // check permissions on each parents
             handle_auth_perm!(self, parent, req, reply, 0b100);
             handle_auth_perm!(self, newparent, req, reply, 0b010);

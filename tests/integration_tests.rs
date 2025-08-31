@@ -1,5 +1,10 @@
 #[cfg(test)]
 mod integration_tests {
+    use fuser::{spawn_mount2, BackgroundSession};
+    use sqlx::{
+        migrate, query, query_as, query_scalar, sqlite::SqliteConnectOptions, Pool, Sqlite,
+        SqlitePool,
+    };
     use std::{
         fs::{self, File},
         io::{self, Read, Write},
@@ -9,14 +14,8 @@ mod integration_tests {
         thread::sleep,
         time::{Duration, SystemTime},
     };
-
-    use async_std::task;
-    use fuser::{spawn_mount2, BackgroundSession};
-    use sqlx::{
-        migrate, query, query_as, query_scalar, sqlite::SqliteConnectOptions, Pool, Sqlite,
-        SqlitePool,
-    };
     use tfs::TagFileSystem;
+    use tokio::test;
 
     const BASE_DIR: &str = env!("CARGO_MANIFEST_DIR");
     struct Setup {
@@ -27,7 +26,7 @@ mod integration_tests {
     }
 
     impl Setup {
-        fn new(mount_path: PathBuf, db_path: PathBuf) -> Self {
+        async fn new(mount_path: PathBuf, db_path: PathBuf) -> Self {
             tracing_subscriber::fmt::try_init().ok();
 
             loop {
@@ -43,39 +42,44 @@ mod integration_tests {
 
             File::create_new(&db_path).unwrap();
 
-            let pool = task::block_on(async {
-                let pool: &'static Pool<Sqlite> = Box::leak(Box::new(
-                    SqlitePool::connect_with(
-                        SqliteConnectOptions::from_str(
-                            format!("sqlite:{}", db_path.to_str().unwrap()).as_str(),
-                        )
-                        .unwrap()
-                        .locking_mode(sqlx::sqlite::SqliteLockingMode::Normal)
-                        .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal),
+            let pool: &'static Pool<Sqlite> = Box::leak(Box::new(
+                SqlitePool::connect_with(
+                    SqliteConnectOptions::from_str(
+                        format!("sqlite:{}", db_path.to_str().unwrap()).as_str(),
                     )
-                    .await
-                    .unwrap(),
-                ));
+                    .unwrap()
+                    .locking_mode(sqlx::sqlite::SqliteLockingMode::Normal)
+                    .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal),
+                )
+                .await
+                .unwrap(),
+            ));
 
-                migrate!().run(pool).await.unwrap();
+            migrate!().run(pool).await.unwrap();
 
-                pool
-            });
-
-            let bg_sess = spawn_mount2(TagFileSystem { pool }, &mount_path, &[]).unwrap();
+            let bg_sess = spawn_mount2(
+                TagFileSystem {
+                    pool,
+                    rt: tokio::runtime::Builder::new_current_thread()
+                        .enable_time()
+                        .build()
+                        .unwrap(),
+                },
+                &mount_path,
+                &[],
+            )
+            .unwrap();
 
             // wait for initialization
-            task::block_on(async {
-                loop {
-                    if let Some(_) = query("SELECT 1 FROM file_attrs WHERE ino = 1")
-                        .fetch_optional(pool)
-                        .await
-                        .unwrap()
-                    {
-                        break;
-                    };
-                }
-            });
+            loop {
+                if let Some(_) = query("SELECT 1 FROM file_attrs WHERE ino = 1")
+                    .fetch_optional(pool)
+                    .await
+                    .unwrap()
+                {
+                    break;
+                };
+            }
 
             Setup {
                 mount_path,
@@ -85,17 +89,16 @@ mod integration_tests {
             }
         }
 
-        fn new_with(mount_path: Option<PathBuf>, db_path: Option<PathBuf>) -> Self {
+        async fn new_with(mount_path: Option<PathBuf>, db_path: Option<PathBuf>) -> Self {
             Self::new(
                 mount_path.unwrap_or([BASE_DIR, "mountpoint"].iter().collect()),
                 db_path.unwrap_or([BASE_DIR, "tfs_test.sqlite"].iter().collect()),
             )
+            .await
         }
-    }
 
-    impl Default for Setup {
-        fn default() -> Self {
-            Setup::new_with(None, None)
+        async fn default() -> Self {
+            Setup::new_with(None, None).await
         }
     }
 
@@ -148,10 +151,10 @@ mod integration_tests {
         dum
     }
 
-    #[ignore]
     #[test]
-    fn mount_interactive() {
-        let _stp = Setup::default();
+    #[ignore]
+    async fn mount_interactive() {
+        let _stp = Setup::default().await;
 
         println!("press enter key to dismount...");
         let mut buf: [u8; 1] = [0];
@@ -159,259 +162,243 @@ mod integration_tests {
     }
 
     #[test]
-    fn mkdir() {
-        task::block_on(async {
-            let stp = Setup::default();
+    async fn mkdir() {
+        let stp = Setup::default().await;
 
-            let dir_name = "foo";
-            let (_, dir_file) = crt_dummy_dir(&stp.mount_path, Some(Path::new(dir_name)));
-            let dir_meta = dir_file.metadata().unwrap();
+        let dir_name = "foo";
+        let (_, dir_file) = crt_dummy_dir(&stp.mount_path, Some(Path::new(dir_name)));
+        let dir_meta = dir_file.metadata().unwrap();
 
-            let tid = query_scalar::<_, i64>("SELECT tid FROM associated_tags WHERE ino = ?")
+        let tid = query_scalar::<_, i64>("SELECT tid FROM associated_tags WHERE ino = ?")
+            .bind(dir_meta.ino() as i64)
+            .fetch_one(stp.pool)
+            .await
+            .unwrap();
+
+        assert!(dir_meta.is_dir());
+        assert_eq!(dir_meta.uid(), unsafe { libc::geteuid() });
+        assert_eq!(dir_meta.gid(), unsafe { libc::getegid() });
+        // assert dir name
+        assert!(
+            query_scalar::<_, String>("SELECT name FROM file_names WHERE ino = ?")
                 .bind(dir_meta.ino() as i64)
                 .fetch_one(stp.pool)
                 .await
-                .unwrap();
-
-            assert!(dir_meta.is_dir());
-            assert_eq!(dir_meta.uid(), unsafe { libc::geteuid() });
-            assert_eq!(dir_meta.gid(), unsafe { libc::getegid() });
-            // assert dir name
-            assert!(
-                query_scalar::<_, String>("SELECT name FROM file_names WHERE ino = ?")
-                    .bind(dir_meta.ino() as i64)
-                    .fetch_one(stp.pool)
-                    .await
-                    .unwrap()
-                    .eq(dir_name)
-            );
-            // assert tag name
-            assert!(
-                query_scalar::<_, String>("SELECT  name FROM tags WHERE tid = ? AND name = ?",)
-                    .bind(tid)
-                    .bind(dir_name)
-                    .fetch_one(stp.pool)
-                    .await
-                    .unwrap()
-                    .eq(dir_name)
-            );
-        })
+                .unwrap()
+                .eq(dir_name)
+        );
+        // assert tag name
+        assert!(
+            query_scalar::<_, String>("SELECT  name FROM tags WHERE tid = ? AND name = ?",)
+                .bind(tid)
+                .bind(dir_name)
+                .fetch_one(stp.pool)
+                .await
+                .unwrap()
+                .eq(dir_name)
+        );
     }
 
     #[test]
     // TODO:
     // - write with offset new file
     // - file larger than sql limit
-    fn write() {
-        task::block_on(async {
-            let stp = Setup::default();
+    async fn write() {
+        let stp = Setup::default().await;
 
-            let dum = fill_dummies(&stp.mount_path, None);
-            let file = dum.file;
+        let dum = fill_dummies(&stp.mount_path, None);
+        let file = dum.file;
 
-            let db_content = || {
-                task::block_on(async {
-                    query_scalar::<_, Vec<u8>>("SELECT content FROM file_contents WHERE ino = $1")
-                        .bind(file.metadata().unwrap().ino() as i64)
-                        .fetch_one(stp.pool)
-                        .await
-                        .unwrap()
-                })
+        let db_content = async || {
+            query_scalar::<_, Vec<u8>>("SELECT content FROM file_contents WHERE ino = $1")
+                .bind(file.metadata().unwrap().ino() as i64)
+                .fetch_one(stp.pool)
+                .await
+                .unwrap()
+        };
+
+        let mut meta = file.metadata().unwrap();
+        let mut mtime = meta.mtime();
+
+        macro_rules! sleep {
+            () => {
+                sleep(Duration::from_millis(1000));
             };
+        }
 
-            let mut meta = file.metadata().unwrap();
-            let mut mtime = meta.mtime();
+        macro_rules! snyc_meta {
+            () => {
+                meta = file.metadata().unwrap();
+            };
+        }
 
-            macro_rules! sleep {
-                () => {
-                    sleep(Duration::from_millis(1000));
-                };
-            }
+        macro_rules! assert_mtime {
+            () => {
+                let prev_mtime = mtime;
+                mtime = meta.mtime();
+                assert!(mtime > prev_mtime);
+            };
+        }
 
-            macro_rules! snyc_meta {
-                () => {
-                    meta = file.metadata().unwrap();
-                };
-            }
+        sleep!();
+        file.write_all_at(b"lorem ipsum", 0).unwrap();
+        snyc_meta!();
+        assert_mtime!();
+        assert_eq!(b"lorem ipsum", db_content().await.as_slice());
+        assert_eq!(meta.size(), 11);
 
-            macro_rules! assert_mtime {
-                () => {
-                    let prev_mtime = mtime;
-                    mtime = meta.mtime();
-                    assert!(mtime > prev_mtime);
-                };
-            }
+        sleep!();
+        file.write_all_at(b"hello world", 6).unwrap();
+        snyc_meta!();
+        assert_mtime!();
+        assert_eq!(b"lorem hello world", db_content().await.as_slice());
+        assert_eq!(meta.size(), 17);
 
-            sleep!();
-            file.write_all_at(b"lorem ipsum", 0).unwrap();
-            snyc_meta!();
-            assert_mtime!();
-            assert_eq!(b"lorem ipsum", db_content().as_slice());
-            assert_eq!(meta.size(), 11);
-
-            sleep!();
-            file.write_all_at(b"hello world", 6).unwrap();
-            snyc_meta!();
-            assert_mtime!();
-            assert_eq!(b"lorem hello world", db_content().as_slice());
-            assert_eq!(meta.size(), 17);
-
-            sleep!();
-            let offset = 1_000_000;
-            file.write_all_at(b"x", offset).unwrap();
-            snyc_meta!();
-            assert_mtime!();
-            assert_eq!(
-                {
-                    let mut v = Vec::from(b"lorem hello world");
-                    v.extend(vec![0u8; offset as usize - 17]);
-                    v.push(b'x');
-                    v
-                },
-                db_content()
-            );
-            assert_eq!(meta.size(), offset + 1);
-        })
+        sleep!();
+        let offset = 1_000_000;
+        file.write_all_at(b"x", offset).unwrap();
+        snyc_meta!();
+        assert_mtime!();
+        assert_eq!(
+            {
+                let mut v = Vec::from(b"lorem hello world");
+                v.extend(vec![0u8; offset as usize - 17]);
+                v.push(b'x');
+                v
+            },
+            db_content().await
+        );
+        assert_eq!(meta.size(), offset + 1);
     }
 
     #[test]
-    fn truncate() {
-        task::block_on(async {
-            let stp = Setup::default();
+    async fn truncate() {
+        let stp = Setup::default().await;
 
-            let full_cnt = b"lorem ipsum";
-            let dum = fill_dummies(&stp.mount_path, Some(full_cnt));
-            let file = dum.file;
-            let ino: i64 = file.metadata().unwrap().ino().try_into().unwrap();
+        let full_cnt = b"lorem ipsum";
+        let dum = fill_dummies(&stp.mount_path, Some(full_cnt));
+        let file = dum.file;
+        let ino: i64 = file.metadata().unwrap().ino().try_into().unwrap();
 
-            let resize = 5;
-            file.set_len(resize).unwrap();
+        let resize = 5;
+        file.set_len(resize).unwrap();
 
-            // define variables to assert equal
-            let expected_cnt = &full_cnt[..5];
+        // define variables to assert equal
+        let expected_cnt = &full_cnt[..5];
 
-            let (db_cnt, db_cnt_len) = query_as::<_, (Vec<u8>, u64)>(
-                "SELECT content, LENGTH(content) FROM file_contents WHERE ino = $1",
-            )
+        let (db_cnt, db_cnt_len) = query_as::<_, (Vec<u8>, u64)>(
+            "SELECT content, LENGTH(content) FROM file_contents WHERE ino = $1",
+        )
+        .bind(ino)
+        .fetch_one(stp.pool)
+        .await
+        .unwrap();
+
+        let db_attr_size = query_scalar::<_, u64>("SELECT size FROM file_attrs WHERE ino = $1")
             .bind(ino)
             .fetch_one(stp.pool)
             .await
             .unwrap();
 
-            let db_attr_size = query_scalar::<_, u64>("SELECT size FROM file_attrs WHERE ino = $1")
-                .bind(ino)
-                .fetch_one(stp.pool)
-                .await
-                .unwrap();
-
-            assert_eq!(db_cnt_len, db_attr_size);
-            assert_eq!(db_cnt, expected_cnt);
-        })
+        assert_eq!(db_cnt_len, db_attr_size);
+        assert_eq!(db_cnt, expected_cnt);
     }
 
     #[test]
-    fn read() {
-        task::block_on(async {
-            let stp = Setup::default();
+    async fn read() {
+        let stp = Setup::default().await;
 
-            let full_cnt = b"lorem ipsum";
-            let dum = fill_dummies(&stp.mount_path, Some(full_cnt));
-            let prev_atime = dum.file.metadata().unwrap().atime();
+        let full_cnt = b"lorem ipsum";
+        let dum = fill_dummies(&stp.mount_path, Some(full_cnt));
+        let prev_atime = dum.file.metadata().unwrap().atime();
 
-            sleep(Duration::from_millis(1000));
-            let read_cnt = fs::read_to_string(dum.file_path).unwrap();
-            let atime = dum.file.metadata().unwrap().atime();
-            assert_eq!(read_cnt.as_bytes(), full_cnt);
-            assert!(atime > prev_atime);
-        })
+        sleep(Duration::from_millis(1000));
+        let read_cnt = fs::read_to_string(dum.file_path).unwrap();
+        let atime = dum.file.metadata().unwrap().atime();
+        assert_eq!(read_cnt.as_bytes(), full_cnt);
+        assert!(atime > prev_atime);
     }
 
     #[test]
-    fn setattr() {
-        task::block_on(async {
-            let stp = Setup::default();
+    async fn setattr() {
+        let stp = Setup::default().await;
 
-            let dum = fill_dummies(&stp.mount_path, None);
-            let file = dum.file;
+        let dum = fill_dummies(&stp.mount_path, None);
+        let file = dum.file;
 
-            let mut meta = file.metadata().unwrap();
-            let prev_ctime = meta.ctime();
+        let mut meta = file.metadata().unwrap();
+        let prev_ctime = meta.ctime();
 
-            sleep(Duration::from_millis(1000));
-            file.set_modified(SystemTime::now()).unwrap();
-            meta = file.metadata().unwrap();
-            assert!(meta.ctime() > prev_ctime);
-        })
+        sleep(Duration::from_millis(1000));
+        file.set_modified(SystemTime::now()).unwrap();
+        meta = file.metadata().unwrap();
+        assert!(meta.ctime() > prev_ctime);
     }
 
     #[test]
-    fn rename_file() {
-        task::block_on(async {
-            let stp = Setup::default();
+    async fn rename_file() {
+        let stp = Setup::default().await;
 
-            let (dir1_path, _) = crt_dummy_dir(&stp.mount_path, Some(Path::new("dir1")));
-            let (dir2_path, _) = crt_dummy_dir(&stp.mount_path, Some(Path::new("dir2")));
+        let (dir1_path, _) = crt_dummy_dir(&stp.mount_path, Some(Path::new("dir1")));
+        let (dir2_path, _) = crt_dummy_dir(&stp.mount_path, Some(Path::new("dir2")));
 
-            let (child_path, child) = crt_dummy_file(&dir1_path, Some(Path::new("child")));
-            let child_ino = child.metadata().unwrap().ino();
+        let (child_path, child) = crt_dummy_file(&dir1_path, Some(Path::new("child")));
+        let child_ino = child.metadata().unwrap().ino();
 
-            let mut new_child_path = dir2_path.clone();
-            new_child_path.push("new_child");
+        let mut new_child_path = dir2_path.clone();
+        new_child_path.push("new_child");
 
-            fs::rename(&child_path, &new_child_path).unwrap();
+        fs::rename(&child_path, &new_child_path).unwrap();
 
-            let new_child_ino = File::open(&new_child_path)
-                .unwrap()
-                .metadata()
-                .unwrap()
-                .ino();
-            assert_eq!(child_ino, new_child_ino);
+        let new_child_ino = File::open(&new_child_path)
+            .unwrap()
+            .metadata()
+            .unwrap()
+            .ino();
+        assert_eq!(child_ino, new_child_ino);
 
-            let expected_err = File::open(&child_path).unwrap_err();
-            assert_eq!(expected_err.kind(), std::io::ErrorKind::NotFound)
-        })
+        let expected_err = File::open(&child_path).unwrap_err();
+        assert_eq!(expected_err.kind(), std::io::ErrorKind::NotFound)
     }
 
     #[test]
-    fn rename_dir() {
-        task::block_on(async {
-            let stp = Setup::default();
+    async fn rename_dir() {
+        let stp = Setup::default().await;
 
-            let (dir1_path, _) = crt_dummy_dir(&stp.mount_path, Some(Path::new("dir1")));
-            let (dir2_path, _) = crt_dummy_dir(&stp.mount_path, Some(Path::new("dir2")));
-            let (inner_dir_path, inner_dir_file) =
-                crt_dummy_dir(&dir1_path, Some(Path::new("inner_dir")));
-            let inner_dir_ino = inner_dir_file.metadata().unwrap().ino();
+        let (dir1_path, _) = crt_dummy_dir(&stp.mount_path, Some(Path::new("dir1")));
+        let (dir2_path, _) = crt_dummy_dir(&stp.mount_path, Some(Path::new("dir2")));
+        let (inner_dir_path, inner_dir_file) =
+            crt_dummy_dir(&dir1_path, Some(Path::new("inner_dir")));
+        let inner_dir_ino = inner_dir_file.metadata().unwrap().ino();
 
-            let (child_path, child) = crt_dummy_file(&inner_dir_path, Some(Path::new("child")));
-            let child_ino = child.metadata().unwrap().ino();
+        let (child_path, child) = crt_dummy_file(&inner_dir_path, Some(Path::new("child")));
+        let child_ino = child.metadata().unwrap().ino();
 
-            let mut new_inner_dir_path = dir2_path.clone();
-            new_inner_dir_path.push("new_inner_dir");
+        let mut new_inner_dir_path = dir2_path.clone();
+        new_inner_dir_path.push("new_inner_dir");
 
-            fs::rename(&inner_dir_path, &new_inner_dir_path).unwrap();
+        fs::rename(&inner_dir_path, &new_inner_dir_path).unwrap();
 
-            let new_inner_dir_ino = File::open(&new_inner_dir_path)
-                .unwrap()
-                .metadata()
-                .unwrap()
-                .ino();
-            assert_eq!(inner_dir_ino, new_inner_dir_ino);
+        let new_inner_dir_ino = File::open(&new_inner_dir_path)
+            .unwrap()
+            .metadata()
+            .unwrap()
+            .ino();
+        assert_eq!(inner_dir_ino, new_inner_dir_ino);
 
-            let mut new_child_path = new_inner_dir_path.clone();
-            new_child_path.push("child");
-            let new_child_ino = File::open(&new_child_path)
-                .unwrap()
-                .metadata()
-                .unwrap()
-                .ino();
-            assert_eq!(child_ino, new_child_ino);
+        let mut new_child_path = new_inner_dir_path.clone();
+        new_child_path.push("child");
+        let new_child_ino = File::open(&new_child_path)
+            .unwrap()
+            .metadata()
+            .unwrap()
+            .ino();
+        assert_eq!(child_ino, new_child_ino);
 
-            let expected_err = File::open(&child_path).unwrap_err();
-            assert_eq!(expected_err.kind(), std::io::ErrorKind::NotFound);
+        let expected_err = File::open(&child_path).unwrap_err();
+        assert_eq!(expected_err.kind(), std::io::ErrorKind::NotFound);
 
-            let expected_err = File::open(&inner_dir_path).unwrap_err();
-            assert_eq!(expected_err.kind(), std::io::ErrorKind::NotFound);
-        })
+        let expected_err = File::open(&inner_dir_path).unwrap_err();
+        assert_eq!(expected_err.kind(), std::io::ErrorKind::NotFound);
     }
 }

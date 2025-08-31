@@ -4,13 +4,11 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-libc = "0.2.172" # sqlx sub-dependency
+# fuser dependency
+libc = "0.2.172"
 fuser = "0.15.1"
-async-std = "1.13.0" # sqlx sub-dependency
-sqlx = { version = "0.8.3", features = [
-  "macros",
-  "runtime-async-std",
-  "sqlite",
-] }
+# sqlx dependency
+tokio = { version = "1.47.1", features = ["macros"] }
+sqlx = { version = "0.8.3", features = ["runtime-tokio", "sqlite"] }
 tracing = "0.1.41"
 tracing-subscriber = "0.3.19"

@@ -105,8 +105,12 @@ mod integration_tests {
     impl Drop for Setup {
         fn drop(&mut self) {
             self.bg_sess.take().unwrap().join();
-            std::fs::remove_dir(&self.mount_path).unwrap();
+            std::fs::remove_dir_all(&self.mount_path).unwrap();
             fs::remove_file(&self.db_path).unwrap();
+
+            while self.mount_path.exists() || self.db_path.exists() {
+                sleep(Duration::from_millis(10));
+            }
         }
     }
 

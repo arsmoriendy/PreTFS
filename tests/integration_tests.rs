@@ -6,7 +6,7 @@ mod integration_tests {
         SqlitePool,
     };
     use std::{
-        fs::{self, create_dir, File},
+        fs::{self, create_dir, remove_file, File},
         io::{self, Read, Write},
         os::unix::fs::{FileExt, MetadataExt},
         path::{Path, PathBuf},
@@ -30,7 +30,7 @@ mod integration_tests {
     struct Setup {
         mount_path: PathBuf,
         db_path: PathBuf,
-        pool: &'static Pool<Sqlite>,
+        pool: Pool<Sqlite>,
         bg_sess: Option<BackgroundSession>,
     }
 
@@ -46,27 +46,30 @@ mod integration_tests {
                     panic!("{e}");
                 }
             }
+            while let Err(e) = File::create_new(&db_path) {
+                if e.kind() == io::ErrorKind::AlreadyExists {
+                    sleep!();
+                } else {
+                    panic!("{e}");
+                }
+            }
 
-            File::create_new(&db_path).unwrap();
-
-            let pool: &'static Pool<Sqlite> = Box::leak(Box::new(
-                SqlitePool::connect_with(
-                    SqliteConnectOptions::from_str(
-                        format!("sqlite:{}", db_path.to_str().unwrap()).as_str(),
-                    )
-                    .unwrap()
-                    .locking_mode(sqlx::sqlite::SqliteLockingMode::Normal)
-                    .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal),
+            let pool = SqlitePool::connect_with(
+                SqliteConnectOptions::from_str(
+                    format!("sqlite:{}", db_path.to_str().unwrap()).as_str(),
                 )
-                .await
-                .unwrap(),
-            ));
+                .unwrap()
+                .locking_mode(sqlx::sqlite::SqliteLockingMode::Normal)
+                .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal),
+            )
+            .await
+            .unwrap();
 
-            migrate!().run(pool).await.unwrap();
+            migrate!().run(&pool).await.unwrap();
 
             let bg_sess = spawn_mount2(
                 TagFileSystem {
-                    pool,
+                    pool: pool.clone(),
                     rt: tokio::runtime::Builder::new_current_thread()
                         .enable_time()
                         .build()
@@ -79,7 +82,7 @@ mod integration_tests {
 
             // wait for initialization
             while query("SELECT 1 FROM file_attrs WHERE ino = 1")
-                .fetch_one(pool)
+                .fetch_one(&pool)
                 .await
                 .is_err()
             {
@@ -90,7 +93,7 @@ mod integration_tests {
                 mount_path,
                 db_path,
                 pool,
-                bg_sess: Some(bg_sess),
+                bg_sess: Some(bg_sess), // TODO: unwrap Option
             }
         }
 
@@ -111,7 +114,7 @@ mod integration_tests {
         fn drop(&mut self) {
             self.bg_sess.take().unwrap().join();
             std::fs::remove_dir_all(&self.mount_path).unwrap();
-            fs::remove_file(&self.db_path).unwrap();
+            remove_file(&self.db_path).unwrap();
         }
     }
 
@@ -176,7 +179,7 @@ mod integration_tests {
 
         let tid = query_scalar::<_, i64>("SELECT tid FROM associated_tags WHERE ino = ?")
             .bind(dir_meta.ino() as i64)
-            .fetch_one(stp.pool)
+            .fetch_one(&stp.pool)
             .await
             .unwrap();
 
@@ -187,7 +190,7 @@ mod integration_tests {
         assert!(
             query_scalar::<_, String>("SELECT name FROM file_names WHERE ino = ?")
                 .bind(dir_meta.ino() as i64)
-                .fetch_one(stp.pool)
+                .fetch_one(&stp.pool)
                 .await
                 .unwrap()
                 .eq(dir_name)
@@ -197,7 +200,7 @@ mod integration_tests {
             query_scalar::<_, String>("SELECT  name FROM tags WHERE tid = ? AND name = ?",)
                 .bind(tid)
                 .bind(dir_name)
-                .fetch_one(stp.pool)
+                .fetch_one(&stp.pool)
                 .await
                 .unwrap()
                 .eq(dir_name)
@@ -218,7 +221,7 @@ mod integration_tests {
         let db_content = async || {
             query_scalar::<_, Vec<u8>>("SELECT content FROM file_contents WHERE ino = $1")
                 .bind(ino as i64)
-                .fetch_one(stp.pool)
+                .fetch_one(&stp.pool)
                 .await
                 .unwrap()
         };
@@ -286,13 +289,13 @@ mod integration_tests {
             "SELECT content, LENGTH(content) FROM file_contents WHERE ino = $1",
         )
         .bind(ino)
-        .fetch_one(stp.pool)
+        .fetch_one(&stp.pool)
         .await
         .unwrap();
 
         let db_attr_size = query_scalar::<_, u64>("SELECT size FROM file_attrs WHERE ino = $1")
             .bind(ino)
-            .fetch_one(stp.pool)
+            .fetch_one(&stp.pool)
             .await
             .unwrap();
 

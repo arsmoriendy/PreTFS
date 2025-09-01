@@ -10,7 +10,7 @@ use libc::c_int;
 use sqlx::{query, query_as, query_scalar, QueryBuilder, Sqlite};
 use std::time::{Duration, SystemTime};
 
-impl Filesystem for TagFileSystem<'_, Sqlite> {
+impl Filesystem for TagFileSystem<Sqlite> {
     #[tracing::instrument]
     fn init(&mut self, req: &Request<'_>, _config: &mut KernelConfig) -> Result<(), c_int> {
         self.rt.block_on(async {
@@ -43,7 +43,7 @@ impl Filesystem for TagFileSystem<'_, Sqlite> {
                     flags: 0,
                 },
             ))?;
-            handle_db_err(q.execute(self.pool).await)?;
+            handle_db_err(q.execute(&self.pool).await)?;
 
             Ok(())
         })
@@ -51,8 +51,11 @@ impl Filesystem for TagFileSystem<'_, Sqlite> {
 
     #[tracing::instrument]
     fn destroy(&mut self) {
+        println!("\n==> DESTROYING <==\n");
         // TODO: delete shm and wal files
-        self.rt.block_on(async { self.pool.close().await });
+        self.rt.block_on(async {
+            let _c = &self.pool.close().await;
+        });
     }
 
     #[tracing::instrument]
@@ -63,7 +66,7 @@ impl Filesystem for TagFileSystem<'_, Sqlite> {
             let attr_row = handle_db_err!(
                 query_as::<_, FileAttrRow>("SELECT * FROM file_attrs WHERE ino = ?")
                     .bind(to_i64!(ino, reply))
-                    .fetch_one(self.pool)
+                    .fetch_one(&self.pool)
                     .await,
                 reply
             );
@@ -102,7 +105,7 @@ impl Filesystem for TagFileSystem<'_, Sqlite> {
             let row = handle_db_err!(
                 query_builder
                     .build_query_as::<ReadDirRow>()
-                    .fetch_one(self.pool)
+                    .fetch_one(&self.pool)
                     .await,
                 reply
             );
@@ -162,7 +165,7 @@ impl Filesystem for TagFileSystem<'_, Sqlite> {
                 query("INSERT INTO file_names VALUES (?, ?)")
                     .bind(to_i64!(f_attrs.ino, reply))
                     .bind(name.to_str())
-                    .execute(self.pool)
+                    .execute(&self.pool)
                     .await,
                 reply
             );
@@ -173,7 +176,7 @@ impl Filesystem for TagFileSystem<'_, Sqlite> {
                     query("INSERT INTO associated_tags VALUES (?, ?)")
                         .bind(to_i64!(ptag, reply))
                         .bind(to_i64!(f_attrs.ino, reply))
-                        .execute(self.pool)
+                        .execute(&self.pool)
                         .await,
                     reply
                 );
@@ -214,7 +217,7 @@ impl Filesystem for TagFileSystem<'_, Sqlite> {
             let rows = handle_db_err!(
                 query_builder
                     .build_query_as::<ReadDirRow>()
-                    .fetch_all(self.pool)
+                    .fetch_all(&self.pool)
                     .await,
                 reply
             );
@@ -276,7 +279,7 @@ impl Filesystem for TagFileSystem<'_, Sqlite> {
                 query("INSERT INTO file_names VALUES (?, ?)")
                     .bind(to_i64!(f_attrs.ino, reply))
                     .bind(name.to_str())
-                    .execute(self.pool)
+                    .execute(&self.pool)
                     .await,
                 reply
             );
@@ -285,7 +288,7 @@ impl Filesystem for TagFileSystem<'_, Sqlite> {
                 query("INSERT INTO dir_contents VALUES (?, ?)")
                     .bind(to_i64!(parent, reply))
                     .bind(to_i64!(f_attrs.ino, reply))
-                    .execute(self.pool)
+                    .execute(&self.pool)
                     .await,
                 reply
             );
@@ -294,7 +297,7 @@ impl Filesystem for TagFileSystem<'_, Sqlite> {
             let tid = match handle_db_err!(
                 query_scalar::<_, u64>("SELECT tid FROM tags WHERE name = ?")
                     .bind(name.to_str())
-                    .fetch_optional(self.pool)
+                    .fetch_optional(&self.pool)
                     .await,
                 reply
             ) {
@@ -303,7 +306,7 @@ impl Filesystem for TagFileSystem<'_, Sqlite> {
                     handle_db_err!(
                         query_scalar::<_, u64>("INSERT INTO tags(name) VALUES (?) RETURNING tid")
                             .bind(name.to_str())
-                            .fetch_one(self.pool)
+                            .fetch_one(&self.pool)
                             .await,
                         reply
                     )
@@ -315,7 +318,7 @@ impl Filesystem for TagFileSystem<'_, Sqlite> {
                 query("INSERT INTO associated_tags VALUES (?, ?)")
                     .bind(to_i64!(tid, reply))
                     .bind(to_i64!(f_attrs.ino, reply))
-                    .execute(self.pool)
+                    .execute(&self.pool)
                     .await,
                 reply
             );
@@ -326,7 +329,7 @@ impl Filesystem for TagFileSystem<'_, Sqlite> {
                     query("INSERT INTO associated_tags VALUES (?, ?)")
                         .bind(to_i64!(ptag, reply))
                         .bind(to_i64!(f_attrs.ino, reply))
-                        .execute(self.pool)
+                        .execute(&self.pool)
                         .await,
                     reply
                 );
@@ -346,13 +349,13 @@ impl Filesystem for TagFileSystem<'_, Sqlite> {
             let ino = handle_db_err!(query_scalar::<_,i64>("SELECT cnt_ino FROM dir_contents INNER JOIN file_names ON file_names.ino = dir_contents.cnt_ino WHERE dir_ino = ? AND name = ?")
                 .bind(to_i64!(parent,reply))
                 .bind(name.to_str().unwrap())
-                .fetch_one(self.pool)
+                .fetch_one(&self.pool)
                 .await, reply);
 
             handle_db_err!(
                 query("DELETE FROM file_attrs WHERE ino = ?")
                     .bind(ino)
-                    .execute(self.pool)
+                    .execute(&self.pool)
                     .await,
                 reply
             );
@@ -387,7 +390,7 @@ impl Filesystem for TagFileSystem<'_, Sqlite> {
             let f_attrs = handle_db_err!(
                 query_builder
                     .build_query_as::<FileAttrRow>()
-                    .fetch_one(self.pool)
+                    .fetch_one(&self.pool)
                     .await,
                 reply
             );
@@ -397,7 +400,7 @@ impl Filesystem for TagFileSystem<'_, Sqlite> {
             handle_db_err!(
                 query("DELETE FROM file_attrs WHERE ino = ?")
                     .bind(to_i64!(f_attrs.ino, reply))
-                    .execute(self.pool)
+                    .execute(&self.pool)
                     .await,
                 reply
             );
@@ -431,7 +434,7 @@ impl Filesystem for TagFileSystem<'_, Sqlite> {
             let row = handle_db_err!(
                 query_as::<_, FileAttrRow>("SELECT * FROM file_attrs WHERE ino = $1")
                     .bind(to_i64!(ino, reply))
-                    .fetch_one(self.pool)
+                    .fetch_one(&self.pool)
                     .await,
                 reply
             );
@@ -443,7 +446,7 @@ impl Filesystem for TagFileSystem<'_, Sqlite> {
                     handle_db_err!(query("UPDATE file_contents SET content = CAST(SUBSTR(content, 1, $1) AS BLOB) WHERE ino = $2")
                         .bind(to_i64!(s,reply))
                         .bind(to_i64!(ino,reply))
-                        .execute(self.pool)
+                        .execute(&self.pool)
                         .await, reply);
                     s
                 }
@@ -492,7 +495,7 @@ impl Filesystem for TagFileSystem<'_, Sqlite> {
             let cnt_len = handle_db_err!(
                 query_scalar::<_, i64>("SELECT LENGTH(content) FROM file_contents WHERE ino = $1")
                     .bind(to_i64!(ino, reply))
-                    .fetch_optional(self.pool)
+                    .fetch_optional(&self.pool)
                     .await,
                 reply
             );
@@ -516,12 +519,12 @@ impl Filesystem for TagFileSystem<'_, Sqlite> {
                 .bind(offset + 1 + data_len )
                 .bind(to_i64!(ino,reply))
                 .bind(pad_len.unwrap_or(0))
-                .execute(self.pool)
+                .execute(&self.pool)
                 .await, reply);
 
             handle_db_err!(query("UPDATE file_attrs SET size = (SELECT LENGTH(content) FROM file_contents WHERE ino = $1) WHERE ino = $1")
                 .bind(to_i64!(ino,reply))
-                .execute(self.pool)
+                .execute(&self.pool)
                 .await, reply);
 
             handle_db_err!(self.sync_mtime(ino).await, reply);
@@ -553,7 +556,7 @@ impl Filesystem for TagFileSystem<'_, Sqlite> {
                 .bind(offset)
                 .bind(size)
                 .bind(to_i64!(ino, reply))
-                .fetch_one(self.pool)
+                .fetch_one(&self.pool)
                 .await,
                 reply
             );
@@ -592,7 +595,7 @@ impl Filesystem for TagFileSystem<'_, Sqlite> {
                 .bind(to_i64!(parent, reply))
                 .bind(name.to_str());
 
-            let rows = handle_db_err!(q.fetch_all(self.pool).await, reply);
+            let rows = handle_db_err!(q.fetch_all(&self.pool).await, reply);
             if rows.len() != 1 {
                 if rows.len() > 1 {
                     tracing::error!("found duplicates")
@@ -624,7 +627,7 @@ impl Filesystem for TagFileSystem<'_, Sqlite> {
                         query_builder
                             .build_query_scalar::<u64>()
                             .bind(to_i64!(ino, reply))
-                            .fetch_all(self.pool)
+                            .fetch_all(&self.pool)
                             .await,
                         reply
                     );
@@ -634,7 +637,7 @@ impl Filesystem for TagFileSystem<'_, Sqlite> {
                         handle_db_err!(
                             query("DELETE FROM associated_tags WHERE ino = $1")
                                 .bind(to_i64!(*child_ino, reply))
-                                .execute(self.pool)
+                                .execute(&self.pool)
                                 .await,
                             reply
                         );
@@ -644,7 +647,7 @@ impl Filesystem for TagFileSystem<'_, Sqlite> {
                     handle_db_err!(
                         query("DELETE from associated_tags WHERE ino = $1")
                             .bind(to_i64!(ino, reply))
-                            .execute(self.pool)
+                            .execute(&self.pool)
                             .await,
                         reply
                     );
@@ -658,7 +661,7 @@ impl Filesystem for TagFileSystem<'_, Sqlite> {
                                 query("INSERT INTO associated_tags (ino, tid) VALUES ($1, $2)")
                                     .bind(to_i64!(*child_ino, reply))
                                     .bind(to_i64!(*new_tid, reply))
-                                    .execute(self.pool)
+                                    .execute(&self.pool)
                                     .await,
                                 reply
                             );
@@ -671,7 +674,7 @@ impl Filesystem for TagFileSystem<'_, Sqlite> {
                             query("INSERT INTO associated_tags (ino, tid) VALUES ($1, $2)")
                                 .bind(to_i64!(ino, reply))
                                 .bind(to_i64!(*new_tid, reply))
-                                .execute(self.pool)
+                                .execute(&self.pool)
                                 .await,
                             reply
                         );
@@ -681,7 +684,7 @@ impl Filesystem for TagFileSystem<'_, Sqlite> {
                     let new_tid = match handle_db_err!(
                         query_scalar::<_, u64>("SELECT tid FROM tags WHERE name = $1")
                             .bind(newname.to_str())
-                            .fetch_optional(self.pool)
+                            .fetch_optional(&self.pool)
                             .await,
                         reply
                     ) {
@@ -692,7 +695,7 @@ impl Filesystem for TagFileSystem<'_, Sqlite> {
                                     "INSERT INTO tags (name) VALUES ($1) RETURNING tid"
                                 )
                                 .bind(newname.to_str())
-                                .fetch_one(self.pool)
+                                .fetch_one(&self.pool)
                                 .await,
                                 reply
                             )
@@ -705,7 +708,7 @@ impl Filesystem for TagFileSystem<'_, Sqlite> {
                             query("INSERT INTO associated_tags (tid, ino) VALUES ($1, $2)")
                                 .bind(to_i64!(new_tid, reply))
                                 .bind(to_i64!(*child_ino, reply))
-                                .execute(self.pool)
+                                .execute(&self.pool)
                                 .await,
                             reply
                         );
@@ -715,7 +718,7 @@ impl Filesystem for TagFileSystem<'_, Sqlite> {
                     let old_tid = handle_db_err!(
                         query_scalar::<_, u64>("SELECT tid FROM tags WHERE name = $1")
                             .bind(name.to_str())
-                            .fetch_one(self.pool)
+                            .fetch_one(&self.pool)
                             .await,
                         reply
                     );
@@ -724,7 +727,7 @@ impl Filesystem for TagFileSystem<'_, Sqlite> {
                             "SELECT COUNT(*) FROM associated_tags WHERE tid = $1"
                         )
                         .bind(to_i64!(old_tid, reply))
-                        .fetch_one(self.pool)
+                        .fetch_one(&self.pool)
                         .await,
                         reply
                     );
@@ -732,7 +735,7 @@ impl Filesystem for TagFileSystem<'_, Sqlite> {
                         handle_db_err!(
                             query("DELETE FROM tags WHERE tid = $1")
                                 .bind(to_i64!(old_tid, reply))
-                                .execute(self.pool)
+                                .execute(&self.pool)
                                 .await,
                             reply
                         );
@@ -743,7 +746,7 @@ impl Filesystem for TagFileSystem<'_, Sqlite> {
                         query("DELETE FROM dir_contents WHERE cnt_ino = $1 AND dir_ino = $2")
                             .bind(to_i64!(ino, reply))
                             .bind(to_i64!(parent, reply))
-                            .execute(self.pool)
+                            .execute(&self.pool)
                             .await,
                         reply
                     );
@@ -753,7 +756,7 @@ impl Filesystem for TagFileSystem<'_, Sqlite> {
                         query("INSERT INTO dir_contents (cnt_ino, dir_ino) VALUES ($1, $2)")
                             .bind(to_i64!(ino, reply))
                             .bind(to_i64!(newparent, reply))
-                            .execute(self.pool)
+                            .execute(&self.pool)
                             .await,
                         reply
                     );
@@ -763,7 +766,7 @@ impl Filesystem for TagFileSystem<'_, Sqlite> {
                     handle_db_err!(
                         query("DELETE from associated_tags WHERE ino = $1")
                             .bind(to_i64!(ino, reply))
-                            .execute(self.pool)
+                            .execute(&self.pool)
                             .await,
                         reply
                     );
@@ -775,7 +778,7 @@ impl Filesystem for TagFileSystem<'_, Sqlite> {
                             query("INSERT INTO associated_tags (ino, tid) VALUES ($1, $2)")
                                 .bind(to_i64!(ino, reply))
                                 .bind(to_i64!(new_tid, reply))
-                                .execute(self.pool)
+                                .execute(&self.pool)
                                 .await,
                             reply
                         );
@@ -793,7 +796,7 @@ impl Filesystem for TagFileSystem<'_, Sqlite> {
                 query("UPDATE file_names SET name = $1 WHERE ino = $2")
                     .bind(newname.to_str())
                     .bind(to_i64!(ino, reply))
-                    .execute(self.pool)
+                    .execute(&self.pool)
                     .await,
                 reply
             );

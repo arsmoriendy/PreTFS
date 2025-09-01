@@ -14,23 +14,23 @@ use std::{num::TryFromIntError, time::SystemTime};
 use tokio::runtime::Runtime;
 
 #[derive(Debug)]
-pub struct TagFileSystem<'a, DB: Database> {
-    pub pool: &'a Pool<DB>,
+pub struct TagFileSystem<DB: Database> {
+    pub pool: Pool<DB>,
     pub rt: Runtime,
 }
 
-impl TagFileSystem<'_, Sqlite> {
+impl TagFileSystem<Sqlite> {
     async fn ins_attrs(&self, attr: &FileAttr) -> Result<u64, DBError> {
         let q = query_scalar::<_, u64>( "INSERT INTO file_attrs VALUES (NULL, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15) RETURNING ino");
         Ok(try_bind_attrs(q, attr)?
             .inner()
-            .fetch_one(self.pool)
+            .fetch_one(&self.pool)
             .await?)
     }
 
     async fn upd_attrs(&self, attr: &FileAttr) -> Result<(), DBError> {
         let q = query("UPDATE file_attrs SET size = $2, blocks = $3, atime = $4, mtime = $5, ctime = $6, crtime = $7, kind = $8, perm = $9, nlink = $10, uid = $11, gid = $12, rdev = $13, blksize = $14, flags = $15 WHERE ino = $1");
-        try_bind_attrs(q, attr)?.execute(self.pool).await?;
+        try_bind_attrs(q, attr)?.execute(&self.pool).await?;
         Ok(())
     }
 
@@ -38,7 +38,7 @@ impl TagFileSystem<'_, Sqlite> {
         Ok(
             query_scalar::<_, u64>("SELECT tid FROM associated_tags WHERE ino = ?")
                 .bind(i64::try_from(ino)?)
-                .fetch_all(self.pool)
+                .fetch_all(&self.pool)
                 .await?,
         )
     }
@@ -47,7 +47,7 @@ impl TagFileSystem<'_, Sqlite> {
         query("UPDATE file_attrs SET mtime = ? WHERE ino = ?")
             .bind(i64::try_from(from_systime(SystemTime::now())?)?)
             .bind(i64::try_from(ino)?)
-            .execute(self.pool)
+            .execute(&self.pool)
             .await?;
         Ok(())
     }
@@ -56,7 +56,7 @@ impl TagFileSystem<'_, Sqlite> {
         query("UPDATE file_attrs SET atime = ? WHERE ino = ?")
             .bind(i64::try_from(from_systime(SystemTime::now())?)?)
             .bind(i64::try_from(ino)?)
-            .execute(self.pool)
+            .execute(&self.pool)
             .await?;
         Ok(())
     }
@@ -73,7 +73,7 @@ impl TagFileSystem<'_, Sqlite> {
     async fn has_ino_perm(&self, ino: u64, uid: u32, gid: u32, rwx: u16) -> Result<bool, DBError> {
         let p_attrs = query_as::<_, FileAttrRow>("SELECT * FROM file_attrs WHERE ino = ?")
             .bind(i64::try_from(ino)?)
-            .fetch_one(self.pool)
+            .fetch_one(&self.pool)
             .await?;
 
         Ok(has_perm(

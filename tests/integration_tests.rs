@@ -6,7 +6,7 @@ mod integration_tests {
         SqlitePool,
     };
     use std::{
-        fs::{self, File},
+        fs::{self, create_dir, File},
         io::{self, Read, Write},
         os::unix::fs::{FileExt, MetadataExt},
         path::{Path, PathBuf},
@@ -16,6 +16,15 @@ mod integration_tests {
     };
     use tfs::TagFileSystem;
     use tokio::test;
+
+    macro_rules! sleep {
+        ($ms: expr) => {
+            sleep(Duration::from_millis($ms));
+        };
+        () => {
+            sleep!(10);
+        };
+    }
 
     const BASE_DIR: &str = env!("CARGO_MANIFEST_DIR");
     struct Setup {
@@ -29,15 +38,13 @@ mod integration_tests {
         async fn new(mount_path: PathBuf, db_path: PathBuf) -> Self {
             tracing_subscriber::fmt::try_init().ok();
 
-            loop {
-                if let Err(e) = std::fs::create_dir(&mount_path) {
-                    if e.kind() == io::ErrorKind::AlreadyExists {
-                        continue;
-                    } else {
-                        panic!("{e}");
-                    }
-                };
-                break;
+            // wait for delete from drop
+            while let Err(e) = create_dir(&mount_path) {
+                if e.kind() == io::ErrorKind::AlreadyExists {
+                    sleep!();
+                } else {
+                    panic!("{e}");
+                }
             }
 
             File::create_new(&db_path).unwrap();
@@ -71,14 +78,12 @@ mod integration_tests {
             .unwrap();
 
             // wait for initialization
-            loop {
-                if let Some(_) = query("SELECT 1 FROM file_attrs WHERE ino = 1")
-                    .fetch_optional(pool)
-                    .await
-                    .unwrap()
-                {
-                    break;
-                };
+            while query("SELECT 1 FROM file_attrs WHERE ino = 1")
+                .fetch_one(pool)
+                .await
+                .is_err()
+            {
+                sleep!();
             }
 
             Setup {
@@ -107,10 +112,6 @@ mod integration_tests {
             self.bg_sess.take().unwrap().join();
             std::fs::remove_dir_all(&self.mount_path).unwrap();
             fs::remove_file(&self.db_path).unwrap();
-
-            while self.mount_path.exists() || self.db_path.exists() {
-                sleep(Duration::from_millis(10));
-            }
         }
     }
 
@@ -224,12 +225,6 @@ mod integration_tests {
         let mut meta = file.metadata().unwrap();
         let mut mtime = meta.mtime();
 
-        macro_rules! sleep {
-            () => {
-                sleep(Duration::from_millis(1000));
-            };
-        }
-
         macro_rules! snyc_meta {
             () => {
                 meta = file.metadata().unwrap();
@@ -244,21 +239,21 @@ mod integration_tests {
             };
         }
 
-        sleep!();
+        sleep!(1000);
         file.write_all_at(b"lorem ipsum", 0).unwrap();
         snyc_meta!();
         assert_mtime!();
         assert_eq!(b"lorem ipsum", db_content().await.as_slice());
         assert_eq!(meta.size(), 11);
 
-        sleep!();
+        sleep!(1000);
         file.write_all_at(b"hello world", 6).unwrap();
         snyc_meta!();
         assert_mtime!();
         assert_eq!(b"lorem hello world", db_content().await.as_slice());
         assert_eq!(meta.size(), 17);
 
-        sleep!();
+        sleep!(1000);
         let offset = 1_000_000;
         file.write_all_at(b"x", offset).unwrap();
         snyc_meta!();

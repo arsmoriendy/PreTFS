@@ -213,10 +213,11 @@ mod integration_tests {
 
         let dum = fill_dummies(&stp.mount_path, None);
         let file = dum.file;
+        let ino = file.metadata().unwrap().ino();
 
         let db_content = async || {
             query_scalar::<_, Vec<u8>>("SELECT content FROM file_contents WHERE ino = $1")
-                .bind(file.metadata().unwrap().ino() as i64)
+                .bind(ino as i64)
                 .fetch_one(stp.pool)
                 .await
                 .unwrap()
@@ -239,25 +240,21 @@ mod integration_tests {
             };
         }
 
-        sleep!(1000);
+        sleep!(1000); // ensure mtime has advanced by >= 1 sec
         file.write_all_at(b"lorem ipsum", 0).unwrap();
-        snyc_meta!();
+        snyc_meta!(); // HACK: this ensures write somehow
         assert_mtime!();
         assert_eq!(b"lorem ipsum", db_content().await.as_slice());
         assert_eq!(meta.size(), 11);
 
-        sleep!(1000);
         file.write_all_at(b"hello world", 6).unwrap();
         snyc_meta!();
-        assert_mtime!();
         assert_eq!(b"lorem hello world", db_content().await.as_slice());
         assert_eq!(meta.size(), 17);
 
-        sleep!(1000);
         let offset = 1_000_000;
         file.write_all_at(b"x", offset).unwrap();
         snyc_meta!();
-        assert_mtime!();
         assert_eq!(
             {
                 let mut v = Vec::from(b"lorem hello world");

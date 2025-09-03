@@ -53,7 +53,6 @@ impl Filesystem for TagFileSystem<Sqlite> {
 
     #[tracing::instrument]
     fn destroy(&mut self) {
-        println!("\n==> DESTROYING <==\n");
         // TODO: delete shm and wal files
         self.rt.block_on(async {
             let _c = &self.pool.close().await;

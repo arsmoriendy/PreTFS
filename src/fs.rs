@@ -7,7 +7,7 @@ use crate::{
 };
 use fuser::*;
 use libc::c_int;
-use sqlx::{query, query_as, query_scalar, QueryBuilder, Sqlite};
+use sqlx::{migrate, query, query_as, query_scalar, QueryBuilder, Sqlite};
 use std::time::{Duration, SystemTime};
 
 impl Filesystem for TagFileSystem<Sqlite> {

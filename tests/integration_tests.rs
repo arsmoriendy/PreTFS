@@ -472,7 +472,7 @@ mod integration_tests {
     }
 
     #[test]
-    async fn touch_tagged() {
+    async fn mknod_tagged() {
         let stp = Setup::default().await;
         let (dir_path, dir) = crt_dummy_dir(&stp.mount_path, Some(Path::new("#dir")));
         let dir_ino = dir.metadata().unwrap().ino();
@@ -500,7 +500,7 @@ mod integration_tests {
     }
 
     #[test]
-    async fn touch_untagged() {
+    async fn mknod_untagged() {
         let stp = Setup::default().await;
         let (dir_path, _) = crt_dummy_dir(&stp.mount_path, Some(Path::new("dir")));
         let (_, file) = crt_dummy_file(&dir_path, Some(Path::new("file")));

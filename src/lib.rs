@@ -10,19 +10,14 @@ use db_helpers::{
 use fuser::{FileAttr, Request};
 use libc::c_int;
 use sqlx::{Database, Pool, Sqlite, query, query_as, query_scalar};
-use std::{
-    ffi::{OsStr, OsString},
-    num::TryFromIntError,
-    os::unix::ffi::OsStrExt,
-    time::SystemTime,
-};
+use std::{ffi::OsStr, num::TryFromIntError, os::unix::ffi::OsStrExt, time::SystemTime};
 use tokio::runtime::Runtime;
 
 #[derive(Debug)]
 pub struct TagFileSystem<DB: Database> {
     pub pool: Pool<DB>,
     pub rt: Runtime,
-    pub tag_prefix: OsString,
+    pub tag_prefix: String,
 }
 
 impl TagFileSystem<Sqlite> {

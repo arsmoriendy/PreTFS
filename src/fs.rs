@@ -9,10 +9,7 @@ use crate::{
 use fuser::*;
 use libc::c_int;
 use sqlx::{QueryBuilder, Sqlite, migrate, query, query_as, query_scalar};
-use std::{
-    os::unix::ffi::OsStrExt,
-    time::{Duration, SystemTime},
-};
+use std::time::{Duration, SystemTime};
 
 impl Filesystem for TagFileSystem<Sqlite> {
     #[tracing::instrument]

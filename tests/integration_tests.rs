@@ -75,7 +75,7 @@ mod integration_tests {
                         .enable_time()
                         .build()
                         .unwrap(),
-                    tag_prefix: OsString::from("#"),
+                    tag_prefix: String::from("#"),
                 },
                 &mount_path,
                 &[],

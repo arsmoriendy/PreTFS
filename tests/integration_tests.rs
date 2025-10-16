@@ -171,6 +171,7 @@ mod integration_tests {
         io::stdin().read_exact(&mut buf).unwrap();
     }
 
+    // TODO: test nested tags
     #[test]
     async fn mkdir_tagged() {
         let stp = Setup::default().await;
@@ -430,5 +431,43 @@ mod integration_tests {
 
         let expected_err = File::open(&inner_dir_path).unwrap_err();
         assert_eq!(expected_err.kind(), std::io::ErrorKind::NotFound);
+    }
+
+    #[test]
+    async fn unlink_tagged() {
+        let stp = Setup::default().await;
+
+        let (dir_path, _) = crt_dummy_dir(&stp.mount_path, Some(Path::new("#dir")));
+        let (file_path, file) = crt_dummy_file(&dir_path, Some(Path::new("file")));
+        let file_ino = file.metadata().unwrap().ino();
+
+        remove_file(file_path).unwrap();
+
+        let q = query("SELECT * FROM file_attrs WHERE ino = ?")
+            .bind(file_ino as i64)
+            .fetch_optional(&stp.pool)
+            .await
+            .unwrap();
+
+        assert!(q.is_none());
+    }
+
+    #[test]
+    async fn unlink_untagged() {
+        let stp = Setup::default().await;
+
+        let (dir_path, _) = crt_dummy_dir(&stp.mount_path, Some(Path::new("dir")));
+        let (file_path, file) = crt_dummy_file(&dir_path, Some(Path::new("file")));
+        let file_ino = file.metadata().unwrap().ino();
+
+        remove_file(file_path).unwrap();
+
+        let q = query("SELECT * FROM file_attrs WHERE ino = ?")
+            .bind(file_ino as i64)
+            .fetch_optional(&stp.pool)
+            .await
+            .unwrap();
+
+        assert!(q.is_none());
     }
 }

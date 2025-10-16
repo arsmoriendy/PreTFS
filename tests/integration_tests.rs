@@ -470,4 +470,54 @@ mod integration_tests {
 
         assert!(q.is_none());
     }
+
+    #[test]
+    async fn touch_tagged() {
+        let stp = Setup::default().await;
+        let (dir_path, dir) = crt_dummy_dir(&stp.mount_path, Some(Path::new("#dir")));
+        let dir_ino = dir.metadata().unwrap().ino();
+        let (_, file) = crt_dummy_file(&dir_path, Some(Path::new("file")));
+        let file_ino = file.metadata().unwrap().ino();
+        let db_file_ino = query_scalar::<_, i64>("SELECT ino FROM file_attrs WHERE ino = ?")
+            .bind(file_ino as i64)
+            .fetch_all(&stp.pool)
+            .await
+            .unwrap();
+        let dir_tid = query_scalar::<_, i64>("SELECT tid FROM associated_tags WHERE ino = ?")
+            .bind(dir_ino as i64)
+            .fetch_one(&stp.pool)
+            .await
+            .unwrap();
+        let file_tid = query_scalar::<_, i64>("SELECT tid FROM associated_tags WHERE ino = ?")
+            .bind(file_ino as i64)
+            .fetch_one(&stp.pool)
+            .await
+            .unwrap();
+
+        assert!(db_file_ino.len() == 1);
+        assert!(db_file_ino[0] == file_ino as i64);
+        assert!(dir_tid == file_tid);
+    }
+
+    #[test]
+    async fn touch_untagged() {
+        let stp = Setup::default().await;
+        let (dir_path, _) = crt_dummy_dir(&stp.mount_path, Some(Path::new("dir")));
+        let (_, file) = crt_dummy_file(&dir_path, Some(Path::new("file")));
+        let file_ino = file.metadata().unwrap().ino();
+        let db_file_ino = query_scalar::<_, i64>("SELECT ino FROM file_attrs WHERE ino = ?")
+            .bind(file_ino as i64)
+            .fetch_all(&stp.pool)
+            .await
+            .unwrap();
+        let file_tid = query_scalar::<_, i64>("SELECT tid FROM associated_tags WHERE ino = ?")
+            .bind(file_ino as i64)
+            .fetch_optional(&stp.pool)
+            .await
+            .unwrap();
+
+        assert!(db_file_ino.len() == 1);
+        assert!(db_file_ino[0] == file_ino as i64);
+        assert!(file_tid.is_none());
+    }
 }

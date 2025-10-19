@@ -6,7 +6,6 @@ mod integration_tests {
         sqlite::SqliteConnectOptions,
     };
     use std::{
-        ffi::OsString,
         fs::{self, File, create_dir, remove_file},
         io::{self, Read, Write},
         os::unix::fs::{FileExt, MetadataExt},

@@ -3,4 +3,5 @@
 - increase file size limit > 1GB
 - implement CLI interface
 - fix join handle on stashed init test
+- test remount
 - find a way to untag files

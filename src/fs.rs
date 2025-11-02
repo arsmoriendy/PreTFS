@@ -265,7 +265,6 @@ impl Filesystem for TagFileSystem<Sqlite> {
         });
     }
 
-    // TODO: prefix
     #[tracing::instrument]
     fn mkdir(
         &mut self,
@@ -279,10 +278,61 @@ impl Filesystem for TagFileSystem<Sqlite> {
         self.rt.block_on(async {
             handle_auth_perm!(self, parent, req, reply, 0b010);
 
+            let name_str = name.to_str().unwrap();
+            let parent_tags = if parent != 1 // not root
+                && self.is_prefixed(&handle_db_err!( // parent is prefixed
+                    self.get_ino_name(to_i64!(parent, reply)).await,
+                    reply
+                )) {
+                Some(handle_db_err!(self.get_ass_tags(parent).await, reply))
+            } else {
+                None
+            };
+            let tid = if self.is_prefixed(name_str) {
+                Some(
+                    match handle_db_err!(
+                        query_scalar::<_, u64>("SELECT tid FROM tags WHERE name = ?")
+                            .bind(name.to_str())
+                            .fetch_optional(&self.pool)
+                            .await,
+                        reply
+                    ) {
+                        Some(tid) => {
+                            if let Some(parent_tags) = parent_tags.as_ref() {
+                                // check recursive redundancy
+                                for ptag in parent_tags {
+                                    if ptag == &tid {
+                                        reply.error(libc::EEXIST);
+                                        return;
+                                    }
+                                }
+                                tid
+                            } else {
+                                tid
+                            }
+                        }
+                        // create tag if doesn't exist
+                        None => {
+                            handle_db_err!(
+                                query_scalar::<_, u64>(
+                                    "INSERT INTO tags(name) VALUES (?) RETURNING tid"
+                                )
+                                .bind(name.to_str())
+                                .fetch_one(&self.pool)
+                                .await,
+                                reply
+                            )
+                        }
+                    },
+                )
+            } else {
+                None
+            };
+
             // TODO: handle duplicates
 
+            // create file_attrs entry
             let now = SystemTime::now();
-
             // TODO: size
             // TODO: figure out perm/mode S_ISUID/S_ISGID/S_ISVTX (inode(7))
             let mut f_attrs = FileAttr {
@@ -302,9 +352,9 @@ impl Filesystem for TagFileSystem<Sqlite> {
                 blksize: 0,
                 flags: 0,
             };
-
             f_attrs.ino = handle_db_err!(self.ins_attrs(&f_attrs).await, reply);
 
+            // create file_names entry
             handle_db_err!(
                 query("INSERT INTO file_names VALUES (?, ?)")
                     .bind(to_i64!(f_attrs.ino, reply))
@@ -314,6 +364,7 @@ impl Filesystem for TagFileSystem<Sqlite> {
                 reply
             );
 
+            // insert into dir_contents
             handle_db_err!(
                 query("INSERT INTO dir_contents VALUES (?, ?)")
                     .bind(to_i64!(parent, reply))
@@ -324,48 +375,28 @@ impl Filesystem for TagFileSystem<Sqlite> {
             );
 
             if self.is_prefixed(name.to_str().unwrap()) {
-                // create tag if doesn't exists
-                let tid = match handle_db_err!(
-                    query_scalar::<_, u64>("SELECT tid FROM tags WHERE name = ?")
-                        .bind(name.to_str())
-                        .fetch_optional(&self.pool)
-                        .await,
-                    reply
-                ) {
-                    Some(tid_row) => tid_row,
-                    None => {
-                        handle_db_err!(
-                            query_scalar::<_, u64>(
-                                "INSERT INTO tags(name) VALUES (?) RETURNING tid"
-                            )
-                            .bind(name.to_str())
-                            .fetch_one(&self.pool)
-                            .await,
-                            reply
-                        )
-                    }
-                };
-
                 // associate created directory with the tid above
                 handle_db_err!(
                     query("INSERT INTO associated_tags VALUES (?, ?)")
-                        .bind(to_i64!(tid, reply))
+                        .bind(to_i64!(tid.unwrap(), reply))
                         .bind(to_i64!(f_attrs.ino, reply))
                         .execute(&self.pool)
                         .await,
                     reply
                 );
 
-                // associate created directory with parent tags
-                for ptag in handle_db_err!(self.get_ass_tags(parent).await, reply) {
-                    handle_db_err!(
-                        query("INSERT INTO associated_tags VALUES (?, ?)")
-                            .bind(to_i64!(ptag, reply))
-                            .bind(to_i64!(f_attrs.ino, reply))
-                            .execute(&self.pool)
-                            .await,
-                        reply
-                    );
+                if let Some(parent_tags) = parent_tags {
+                    // associate created directory with parent tags
+                    for ptag in parent_tags {
+                        handle_db_err!(
+                            query("INSERT INTO associated_tags VALUES (?, ?)")
+                                .bind(to_i64!(ptag, reply))
+                                .bind(to_i64!(f_attrs.ino, reply))
+                                .execute(&self.pool)
+                                .await,
+                            reply
+                        );
+                    }
                 }
             }
 
@@ -392,6 +423,32 @@ impl Filesystem for TagFileSystem<Sqlite> {
                 reply
             );
 
+            let children = if self.is_prefixed(name.to_str().unwrap()) {
+                let tags = handle_db_err!(self.get_ass_tags(ino.try_into().unwrap()).await, reply);
+                let mut query_builder =
+                    QueryBuilder::<Sqlite>::new("SELECT ino FROM file_attrs WHERE ino IN (");
+                handle_db_err!(chain_tagged_inos(&mut query_builder, &tags), reply);
+                query_builder
+                    .push(") OR ino IN (SELECT cnt_ino FROM dir_contents WHERE dir_ino = ?)");
+                handle_db_err!(
+                    query_builder
+                        .build_query_scalar::<u64>()
+                        .bind(ino)
+                        .fetch_all(&self.pool)
+                        .await,
+                    reply
+                )
+            } else {
+                // count doesn't matter
+                handle_db_err!(
+                    query_scalar("SELECT cnt_ino FROM dir_contents WHERE dir_ino = ? LIMIT 1")
+                        .bind(ino)
+                        .fetch_all(&self.pool)
+                        .await,
+                    reply
+                )
+            };
+
             handle_db_err!(
                 query("DELETE FROM file_attrs WHERE ino = ?")
                     .bind(ino)
@@ -399,6 +456,18 @@ impl Filesystem for TagFileSystem<Sqlite> {
                     .await,
                 reply
             );
+
+            if self.is_prefixed(name.to_str().unwrap()) {
+                for child_ino in children {
+                    handle_db_err!(
+                        query("DELETE FROM associated_tags WHERE ino = $1")
+                            .bind(to_i64!(child_ino, reply))
+                            .execute(&self.pool)
+                            .await,
+                        reply
+                    );
+                }
+            }
 
             reply.ok();
         })

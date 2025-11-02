@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod test {
     use crate::db_helpers::chain_tagged_inos;
-    use sqlx::{migrate, query, QueryBuilder, Sqlite, SqlitePool};
+    use sqlx::{QueryBuilder, Sqlite, SqlitePool, migrate, query};
     use tokio::test;
 
     #[test]

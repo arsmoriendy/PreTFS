@@ -2,7 +2,7 @@ pub mod types;
 
 use fuser::FileAttr;
 use sqlx::{QueryBuilder, Sqlite};
-use types::{from_filetype, from_systime, Bindable, ConvError, DBError};
+use types::{Bindable, ConvError, DBError, from_filetype, from_systime};
 
 pub fn try_bind_attrs<'q, Q, B>(b: B, a: &FileAttr) -> Result<Q, ConvError>
 where

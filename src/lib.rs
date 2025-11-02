@@ -10,7 +10,7 @@ use db_helpers::{
 use fuser::{FileAttr, Request};
 use libc::c_int;
 use sqlx::{Database, Pool, Sqlite, query, query_as, query_scalar};
-use std::{ffi::OsStr, num::TryFromIntError, os::unix::ffi::OsStrExt, time::SystemTime};
+use std::{num::TryFromIntError, time::SystemTime};
 use tokio::runtime::Runtime;
 
 #[derive(Debug)]

@@ -1,8 +1,8 @@
 use fuser::{FileAttr, FileType};
 use libc::c_int;
 use sqlx::{
-    query::{Query, QueryAs, QueryScalar},
     Database, Encode, FromRow, Type,
+    query::{Query, QueryAs, QueryScalar},
 };
 use std::{
     num::TryFromIntError,

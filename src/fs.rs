@@ -19,7 +19,10 @@ impl Filesystem for TagFileSystem<Sqlite> {
 
             // create mountpoint attr if not exist
             let q = handle_db_err(try_bind_attrs(
-                query("INSERT OR IGNORE INTO file_attrs VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)"),
+                query(
+                    "INSERT OR IGNORE INTO file_attrs VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, \
+                     $10, $11, $12, $13, $14, $15)",
+                ),
                 &FileAttr {
                     ino: 1,
                     nlink: 1,
@@ -377,11 +380,17 @@ impl Filesystem for TagFileSystem<Sqlite> {
         self.rt.block_on(async {
             handle_auth_perm!(self, parent, req, reply, 0b010);
 
-            let ino = handle_db_err!(query_scalar::<_,i64>("SELECT cnt_ino FROM dir_contents INNER JOIN file_names ON file_names.ino = dir_contents.cnt_ino WHERE dir_ino = ? AND name = ?")
-                .bind(to_i64!(parent,reply))
+            let ino = handle_db_err!(
+                query_scalar::<_, i64>(
+                    "SELECT cnt_ino FROM dir_contents INNER JOIN file_names ON file_names.ino = \
+                     dir_contents.cnt_ino WHERE dir_ino = ? AND name = ?"
+                )
+                .bind(to_i64!(parent, reply))
                 .bind(name.to_str().unwrap())
                 .fetch_one(&self.pool)
-                .await, reply);
+                .await,
+                reply
+            );
 
             handle_db_err!(
                 query("DELETE FROM file_attrs WHERE ino = ?")
@@ -474,11 +483,17 @@ impl Filesystem for TagFileSystem<Sqlite> {
 
             attr.size = match size {
                 Some(s) => {
-                    handle_db_err!(query("UPDATE file_contents SET content = CAST(SUBSTR(content, 1, $1) AS BLOB) WHERE ino = $2")
-                        .bind(to_i64!(s,reply))
-                        .bind(to_i64!(ino,reply))
+                    handle_db_err!(
+                        query(
+                            "UPDATE file_contents SET content = CAST(SUBSTR(content, 1, $1) AS \
+                             BLOB) WHERE ino = $2"
+                        )
+                        .bind(to_i64!(s, reply))
+                        .bind(to_i64!(ino, reply))
                         .execute(&self.pool)
-                        .await, reply);
+                        .await,
+                        reply
+                    );
                     s
                 }
                 None => attr.size,
@@ -544,19 +559,32 @@ impl Filesystem for TagFileSystem<Sqlite> {
 
             // cast to BLOB because sqlite converts all concat (||) expressions to TEXT
             // https://stackoverflow.com/questions/55301281/update-query-to-append-zeroes-into-blob-field-with-sqlitestudio
-            handle_db_err!(query("INSERT INTO file_contents VALUES ($4, CAST(ZEROBLOB($5) || $2 AS BLOB)) ON CONFLICT(ino) DO UPDATE SET content = CAST(SUBSTR(content, 1, $1) || ZEROBLOB($5) || $2 || SUBSTR(content, $3) AS BLOB) WHERE ino = $4")
+            handle_db_err!(
+                query(
+                    "INSERT INTO file_contents VALUES ($4, CAST(ZEROBLOB($5) || $2 AS BLOB)) ON \
+                     CONFLICT(ino) DO UPDATE SET content = CAST(SUBSTR(content, 1, $1) || \
+                     ZEROBLOB($5) || $2 || SUBSTR(content, $3) AS BLOB) WHERE ino = $4"
+                )
                 .bind(offset)
                 .bind(data)
-                .bind(offset + 1 + data_len )
-                .bind(to_i64!(ino,reply))
+                .bind(offset + 1 + data_len)
+                .bind(to_i64!(ino, reply))
                 .bind(pad_len.unwrap_or(0))
                 .execute(&self.pool)
-                .await, reply);
+                .await,
+                reply
+            );
 
-            handle_db_err!(query("UPDATE file_attrs SET size = (SELECT LENGTH(content) FROM file_contents WHERE ino = $1) WHERE ino = $1")
-                .bind(to_i64!(ino,reply))
+            handle_db_err!(
+                query(
+                    "UPDATE file_attrs SET size = (SELECT LENGTH(content) FROM file_contents \
+                     WHERE ino = $1) WHERE ino = $1"
+                )
+                .bind(to_i64!(ino, reply))
                 .execute(&self.pool)
-                .await, reply);
+                .await,
+                reply
+            );
 
             handle_db_err!(self.sync_mtime(ino).await, reply);
 

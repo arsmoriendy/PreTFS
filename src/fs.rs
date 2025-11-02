@@ -423,25 +423,6 @@ impl Filesystem for TagFileSystem<Sqlite> {
                 reply
             );
 
-            let tagged_children = if self.is_prefixed(name.to_str().unwrap()) {
-                let tags = handle_db_err!(self.get_ass_tags(ino.try_into().unwrap()).await, reply);
-                let mut query_builder =
-                    QueryBuilder::<Sqlite>::new("SELECT ino FROM file_attrs WHERE ino IN (");
-                handle_db_err!(chain_tagged_inos(&mut query_builder, &tags), reply);
-                query_builder
-                    .push(") OR ino IN (SELECT cnt_ino FROM dir_contents WHERE dir_ino = ?)");
-                Some(handle_db_err!(
-                    query_builder
-                        .build_query_scalar::<u64>()
-                        .bind(ino)
-                        .fetch_all(&self.pool)
-                        .await,
-                    reply
-                ))
-            } else {
-                None
-            };
-
             handle_db_err!(
                 query("DELETE FROM file_attrs WHERE ino = ?")
                     .bind(ino)
@@ -451,8 +432,24 @@ impl Filesystem for TagFileSystem<Sqlite> {
             );
 
             if self.is_prefixed(name.to_str().unwrap()) {
+                // get children
+                let tags = handle_db_err!(self.get_ass_tags(ino.try_into().unwrap()).await, reply);
+                let mut query_builder =
+                    QueryBuilder::<Sqlite>::new("SELECT ino FROM file_attrs WHERE ino IN (");
+                handle_db_err!(chain_tagged_inos(&mut query_builder, &tags), reply);
+                query_builder
+                    .push(") OR ino IN (SELECT cnt_ino FROM dir_contents WHERE dir_ino = ?)");
+                let children = handle_db_err!(
+                    query_builder
+                        .build_query_scalar::<u64>()
+                        .bind(ino)
+                        .fetch_all(&self.pool)
+                        .await,
+                    reply
+                );
+
                 // delete children association
-                for child_ino in tagged_children.unwrap() {
+                for child_ino in children {
                     handle_db_err!(
                         query("DELETE FROM associated_tags WHERE ino = $1")
                             .bind(to_i64!(child_ino, reply))

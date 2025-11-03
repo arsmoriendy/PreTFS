@@ -82,7 +82,6 @@ impl Filesystem for TagFileSystem<Sqlite> {
         });
     }
 
-    // TODO: prefix
     #[tracing::instrument]
     fn lookup(
         &mut self,
@@ -101,9 +100,7 @@ impl Filesystem for TagFileSystem<Sqlite> {
             handle_db_err!(chain_tagged_inos(&mut query_builder, &ptags), reply);
 
             query_builder
-                .push(
-                    ") AND kind != 3 OR ino IN (SELECT cnt_ino FROM dir_contents WHERE dir_ino = ",
-                )
+                .push(") OR ino IN (SELECT cnt_ino FROM dir_contents WHERE dir_ino = ")
                 .push_bind(to_i64!(parent, reply))
                 .push(")) AND name = ")
                 .push_bind(name.to_str());

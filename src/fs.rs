@@ -213,7 +213,6 @@ impl Filesystem for TagFileSystem<Sqlite> {
         });
     }
 
-    // TODO: prefix
     #[tracing::instrument]
     fn readdir(
         &mut self,
@@ -225,35 +224,57 @@ impl Filesystem for TagFileSystem<Sqlite> {
     ) {
         self.rt.block_on(async {
             handle_auth_perm!(self, ino, req, reply, 0b100);
+            let name = if ino != 1 {
+                Some(handle_db_err!(
+                    self.get_ino_name(to_i64!(ino, reply)).await,
+                    reply
+                ))
+            } else {
+                None
+            };
 
-            let mut query_builder =
-                QueryBuilder::<Sqlite>::new("SELECT * FROM readdir_rows WHERE (ino IN (");
+            let children: Vec<ReadDirRow> = if let Some(name) = name
+                && self.is_prefixed(&name)
+            {
+                let mut query_builder =
+                    QueryBuilder::<Sqlite>::new("SELECT * FROM readdir_rows WHERE (ino IN (");
 
-            let ptags = handle_db_err!(self.get_ass_tags(ino).await, reply);
-            handle_db_err!(chain_tagged_inos(&mut query_builder, &ptags), reply);
+                let tags = handle_db_err!(self.get_ass_tags(ino).await, reply);
+                handle_db_err!(chain_tagged_inos(&mut query_builder, &tags), reply);
 
-            query_builder
-                .push(
-                    ") AND kind != 3 OR ino IN (SELECT cnt_ino FROM dir_contents WHERE dir_ino = ",
+                handle_db_err!(
+                    query_builder
+                        .push(") AND name NOT LIKE ")
+                        .push_bind(format!("{}%", self.tag_prefix))
+                        .push(" OR ino IN (SELECT cnt_ino FROM dir_contents WHERE dir_ino = ")
+                        .push_bind(to_i64!(ino, reply))
+                        .push(")) ORDER BY ino LIMIT -1 OFFSET ")
+                        .push_bind(offset)
+                        .build_query_as()
+                        .fetch_all(&self.pool)
+                        .await,
+                    reply
                 )
-                .push_bind(to_i64!(ino, reply))
-                .push(")) ORDER BY ino LIMIT -1 OFFSET ")
-                .push_bind(offset);
-
-            let rows = handle_db_err!(
-                query_builder
-                    .build_query_as::<ReadDirRow>()
+            } else {
+                handle_db_err!(
+                    query_as(
+                        "SELECT * FROM readdir_rows WHERE ino IN (SELECT cnt_ino FROM \
+                         dir_contents WHERE dir_ino = ?) ORDER BY ino LIMIT -1 OFFSET ?",
+                    )
+                    .bind(to_i64!(ino, reply))
+                    .bind(offset)
                     .fetch_all(&self.pool)
                     .await,
-                reply
-            );
+                    reply
+                )
+            };
 
-            for row in rows.iter().enumerate() {
-                let attr = &row.1.attr;
-                let name = &row.1.name;
+            for (i, child) in children.iter().enumerate() {
+                let attr = &child.attr;
+                let name = &child.name;
                 let ftyp = handle_db_err!(to_filetype(attr.kind), reply);
 
-                if reply.add(attr.ino, offset + to_i64!(row.0, reply) + 1, ftyp, name) {
+                if reply.add(attr.ino, offset + to_i64!(i, reply) + 1, ftyp, name) {
                     break;
                 };
             }

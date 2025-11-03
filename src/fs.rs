@@ -441,7 +441,8 @@ impl Filesystem for TagFileSystem<Sqlite> {
             let ino = handle_db_err!(
                 query_scalar::<_, i64>(
                     "SELECT cnt_ino FROM dir_contents INNER JOIN file_names ON file_names.ino = \
-                     dir_contents.cnt_ino WHERE dir_ino = ? AND name = ?"
+                     dir_contents.cnt_ino INNER JOIN file_attrs ON file_attrs.ino = \
+                     dir_contents.cnt_ino WHERE kind = 3 AND dir_ino = ? AND name = ?"
                 )
                 .bind(to_i64!(parent, reply))
                 .bind(name.to_str().unwrap())

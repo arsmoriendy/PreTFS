@@ -297,11 +297,17 @@ impl Filesystem for TagFileSystem<Sqlite> {
             handle_auth_perm!(self, parent, req, reply, 0b010);
 
             let name_str = name.to_str().unwrap();
-            let parent_tags = if parent != 1 // not root
-                && self.is_prefixed(&handle_db_err!( // parent is prefixed
+            let is_prefixed = self.is_prefixed(name.to_str().unwrap());
+            let parent_prefixed = if parent != 1 // not root
+                && self.is_prefixed(&handle_db_err!(
                     self.get_ino_name(to_i64!(parent, reply)).await,
                     reply
                 )) {
+                true
+            } else {
+                false
+            };
+            let parent_tags = if parent_prefixed {
                 Some(handle_db_err!(self.get_ass_tags(parent).await, reply))
             } else {
                 None
@@ -382,17 +388,33 @@ impl Filesystem for TagFileSystem<Sqlite> {
                 reply
             );
 
-            // insert into dir_contents
-            handle_db_err!(
-                query("INSERT INTO dir_contents VALUES (?, ?)")
-                    .bind(to_i64!(parent, reply))
-                    .bind(to_i64!(f_attrs.ino, reply))
-                    .execute(&self.pool)
-                    .await,
-                reply
-            );
+            if parent_prefixed {
+                // associate created directory with parent tags
+                for ptag in parent_tags.unwrap() {
+                    handle_db_err!(
+                        query("INSERT INTO associated_tags VALUES (?, ?)")
+                            .bind(to_i64!(ptag, reply))
+                            .bind(to_i64!(f_attrs.ino, reply))
+                            .execute(&self.pool)
+                            .await,
+                        reply
+                    );
+                }
+            }
 
-            if self.is_prefixed(name.to_str().unwrap()) {
+            if !parent_prefixed || is_prefixed {
+                // insert into dir_contents
+                handle_db_err!(
+                    query("INSERT INTO dir_contents VALUES (?, ?)")
+                        .bind(to_i64!(parent, reply))
+                        .bind(to_i64!(f_attrs.ino, reply))
+                        .execute(&self.pool)
+                        .await,
+                    reply
+                );
+            }
+
+            if is_prefixed {
                 // associate created directory with the tid above
                 handle_db_err!(
                     query("INSERT INTO associated_tags VALUES (?, ?)")
@@ -402,20 +424,6 @@ impl Filesystem for TagFileSystem<Sqlite> {
                         .await,
                     reply
                 );
-
-                if let Some(parent_tags) = parent_tags {
-                    // associate created directory with parent tags
-                    for ptag in parent_tags {
-                        handle_db_err!(
-                            query("INSERT INTO associated_tags VALUES (?, ?)")
-                                .bind(to_i64!(ptag, reply))
-                                .bind(to_i64!(f_attrs.ino, reply))
-                                .execute(&self.pool)
-                                .await,
-                            reply
-                        );
-                    }
-                }
             }
 
             handle_db_err!(self.sync_mtime(parent).await, reply);

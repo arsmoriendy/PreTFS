@@ -125,8 +125,6 @@ impl Filesystem for TagFileSystem<Sqlite> {
         self.runtime_handle.block_on(async {
             handle_auth_perm!(self, parent, req, reply, 0b010);
 
-            // TODO: handle duplicates
-
             let kind = handle_db_err!(mode_to_filetype(mode), reply);
 
             if kind != FileType::RegularFile {
@@ -345,8 +343,6 @@ impl Filesystem for TagFileSystem<Sqlite> {
             } else {
                 None
             };
-
-            // TODO: handle duplicates
 
             // create file_attrs entry
             let now = SystemTime::now();

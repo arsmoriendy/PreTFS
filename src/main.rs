@@ -17,6 +17,7 @@ fn main() {
         File::create_new(&database).unwrap();
     }
 
+    // TODO: handle logging
     let rt = Runtime::new().unwrap();
     let fs = rt.block_on(async {
         let pool = SqlitePool::connect_with(

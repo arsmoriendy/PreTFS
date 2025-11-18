@@ -3,6 +3,7 @@ mod macros;
 
 pub use std::{
     fs::{File, create_dir, remove_dir, remove_file, rename},
+    io::ErrorKind as IoErrorKind,
     path::PathBuf,
     str::FromStr,
 };

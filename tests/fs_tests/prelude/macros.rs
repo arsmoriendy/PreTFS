@@ -49,3 +49,10 @@ macro_rules! cleanup_paths {
         remove_file(DB_PATH).unwrap();
     };
 }
+
+macro_rules! reg_method {
+    ($m:ident) => {
+        mod $m;
+        use $m::*;
+    };
+}

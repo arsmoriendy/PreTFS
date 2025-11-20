@@ -9,7 +9,10 @@ use crate::{
 use fuser::*;
 use libc::c_int;
 use sqlx::{QueryBuilder, Sqlite, migrate, query, query_as, query_scalar};
-use std::time::{Duration, SystemTime};
+use std::{
+    cmp::min,
+    time::{Duration, SystemTime},
+};
 
 impl Filesystem for HTFS<Sqlite> {
     #[tracing::instrument]
@@ -692,7 +695,7 @@ impl Filesystem for HTFS<Sqlite> {
                      {data_length}, page = {page}, start_page = {start_page} page_size = \
                      {page_size}, page_span = {page_span}",
                 );
-                let Some(data_slice) = data.get(data_start..data_end) else {
+                let Some(data_slice) = data.get(data_start..min(data_end, data.len())) else {
                     reply.error(libc::EIO); // TODO: find appropriate error code
                     return;
                 };

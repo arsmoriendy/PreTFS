@@ -12,23 +12,24 @@ pub fn test_write() {
     // o    : empty data
     //
     // == Aligned
-    // [|-|]
-    // [|--][--|]
-    // [---][|--][--|]
-    // [ooo][|--][--|]
+    // 1.   [|-|]
+    // 2.   [|--][--|]
+    // 3.   [---][|--][--|]
+    // 4.   [ooo][|--][--|]
     //
     // == Unaligned
-    // [-||]
-    // [-|-][--|]
-    // [---][-|-][--|]
-    // [ooo][-|-][--|]
-    // [||-]
-    // [|--][-|-]
-    // [---][|--][-|-]
-    // [ooo][|--][-|-]
+    // 5.   [-||]
+    // 6.   [-|-][--|]
+    // 7.   [---][-|-][--|]
+    // 8.   [ooo][-|-][--|]
+    // 9.   [||o]
+    // 10.  [|--][-|o]
+    // 11.  [---][|--][-|o]
+    // 12.  [ooo][|--][-|o]
 
-    aligned();
-    aligned_span();
+    aligned(); // 1
+    aligned_span(); // 2
+    unaligned_end_span(); // 10
 }
 
 const PAGE_SIZE: usize = 4096;
@@ -56,6 +57,28 @@ fn aligned_span() {
     let Test { bg_sess, rt, pool } = Test::new();
 
     let size = PAGE_SIZE * 2;
+    let bytes: Vec<u8> = rand::random_iter().take(size).collect();
+    let mut file = create_file(path!(MP_PATH, "file")).unwrap();
+    file.write_all(&bytes).unwrap();
+
+    let db_bytes: Vec<u8> = rt
+        .block_on(
+            query_scalar(
+                "SELECT (SELECT bytes FROM file_contents WHERE ino = 2 AND page = 0) || (SELECT \
+                 bytes FROM file_contents WHERE ino = 2 AND page = 1)",
+            )
+            .fetch_one(&pool),
+        )
+        .unwrap();
+    assert!(bytes == db_bytes);
+
+    Test::cleanup(bg_sess);
+}
+
+fn unaligned_end_span() {
+    let Test { bg_sess, rt, pool } = Test::new();
+
+    let size = PAGE_SIZE + 512;
     let bytes: Vec<u8> = rand::random_iter().take(size).collect();
     let mut file = create_file(path!(MP_PATH, "file")).unwrap();
     file.write_all(&bytes).unwrap();

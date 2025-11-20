@@ -21,6 +21,7 @@ pub struct Test {
 
 impl Test {
     pub fn new() -> Test {
+        tracing_subscriber::fmt::try_init().ok();
         init_paths!();
         let rt = Runtime::new().unwrap();
         let pool = rt.block_on(init_pool!()).unwrap();

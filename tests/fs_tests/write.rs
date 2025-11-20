@@ -1,4 +1,4 @@
-use std::io::{Read, Write};
+use std::io::Write;
 
 load_prelude!();
 
@@ -29,6 +29,7 @@ pub fn test_write() {
 
     aligned(); // 1
     aligned_span(); // 2
+    unaligned_end(); // 9
     unaligned_end_span(); // 10
 }
 
@@ -68,6 +69,25 @@ fn aligned_span() {
                  bytes FROM file_contents WHERE ino = 2 AND page = 1)",
             )
             .fetch_one(&pool),
+        )
+        .unwrap();
+    assert!(bytes == db_bytes);
+
+    Test::cleanup(bg_sess);
+}
+
+fn unaligned_end() {
+    let Test { bg_sess, rt, pool } = Test::new();
+
+    let size = PAGE_SIZE - 512;
+    let bytes: Vec<u8> = rand::random_iter().take(size).collect();
+    let mut file = create_file(path!(MP_PATH, "file")).unwrap();
+    file.write_all(&bytes).unwrap();
+
+    let db_bytes: Vec<u8> = rt
+        .block_on(
+            query_scalar("SELECT bytes FROM file_contents WHERE ino = 2 AND page = 0")
+                .fetch_one(&pool),
         )
         .unwrap();
     assert!(bytes == db_bytes);

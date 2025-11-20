@@ -1,4 +1,4 @@
-use super::prelude::*;
+load_prelude!();
 
 pub fn test_rename() {
     // TODO: test:

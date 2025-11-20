@@ -56,3 +56,9 @@ macro_rules! reg_method {
         use $m::*;
     };
 }
+
+macro_rules! load_prelude {
+    () => {
+        use super::prelude::*;
+    };
+}

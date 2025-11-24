@@ -802,6 +802,27 @@ impl Filesystem for HTFS<Sqlite> {
                 );
             }
 
+            // update file size
+            let last_page_size: i64 = handle_db_err!(
+                query_scalar("SELECT LENGTH(bytes) FROM file_contents WHERE ino = ? AND page = ?")
+                    .bind(to_i64!(ino, reply))
+                    .bind(to_i64!(last_page, reply))
+                    .fetch_one(&self.pool)
+                    .await,
+                reply
+            );
+            let mut file_size: i64 =
+                handle_from_int_err!((page_size * last_page).try_into(), reply);
+            file_size += last_page_size;
+            handle_db_err!(
+                query("UPDATE file_attrs SET size = ? WHERE ino = ?")
+                    .bind(file_size)
+                    .bind(to_i64!(ino, reply))
+                    .execute(&self.pool)
+                    .await,
+                reply
+            );
+
             let _written_size = handle_from_int_err!(data.len().try_into(), reply);
             reply.written(_written_size);
         });

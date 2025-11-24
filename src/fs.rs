@@ -744,10 +744,10 @@ impl Filesystem for HTFS<Sqlite> {
                     reply
                 );
                 if let Some(mut db_data) = db_data {
-                    if offset_page == last_page {
+                    if page == last_page {
                         let new_len = max(
                             match offset_page == start_page && offset_page == end_page {
-                                true => usize_offset + 1 + data_slice.len(),
+                                true => usize_offset + data_slice.len(),
                                 false => data_slice.len(),
                             },
                             db_data.len(),
@@ -758,7 +758,8 @@ impl Filesystem for HTFS<Sqlite> {
                         true => usize_offset,
                         false => 0,
                     };
-                    db_data[start_offset..].copy_from_slice(data_slice);
+                    db_data[start_offset..start_offset + data_slice.len()]
+                        .copy_from_slice(data_slice);
                     handle_db_err!(
                         query("UPDATE file_contents SET bytes = ? WHERE ino = ? AND page = ?")
                             .bind(db_data)

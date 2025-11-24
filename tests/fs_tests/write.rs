@@ -6,31 +6,24 @@ pub fn test_write() {
     // = CASES
     //
     // Legend:
-    // []   : page delimiter
-    // |    : offset / end of data
-    // -    : data
-    // o    : empty data
+    // |    : page delimiter
+    // [    : start of data
+    // ]    : end of data
+    // /    : data
+    // -    : empty data
     //
     // == Aligned
-    // 1.   [|-|]
-    // 2.   [|--][--|]
-    // 3.   [---][|--][--|]
-    // 4.   [ooo][|--][--|]
+    // 1.   |[---]|
+    // 2.   |[----|----]|
     //
     // == Unaligned
-    // 5.   [-||]
-    // 6.   [-|-][--|]
-    // 7.   [---][-|-][--|]
-    // 8.   [ooo][o|-][--|]
-    // 9.   [||o]
-    // 10.  [|--][-|o]
-    // 11.  [---][|--][-|o]
-    // 12.  [ooo][|--][-|o]
+    // 3.   |[-]--|
+    // 4.   |[----|-]---|
 
     aligned(); // 1
     aligned_span(); // 2
-    unaligned_end(); // 9
-    unaligned_end_span(); // 10
+    unaligned_end(); // 3
+    unaligned_end_span(); // 4
 }
 
 const PAGE_SIZE: usize = 4096;

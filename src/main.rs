@@ -1,4 +1,8 @@
-use std::{fs::File, str::FromStr};
+use std::{
+    fs::{File, create_dir},
+    io::ErrorKind as IoErrorKind,
+    str::FromStr,
+};
 
 use clap::Parser;
 use htfs::HTFS;
@@ -16,7 +20,16 @@ fn main() {
     tracing_subscriber::fmt::try_init().ok();
 
     if new {
-        File::create_new(&database).unwrap();
+        let db_err = File::create_new(&database).err();
+        let mp_err = create_dir(&mountpoint).err();
+
+        for e in [db_err, mp_err] {
+            if let Some(e) = e
+                && e.kind() != IoErrorKind::AlreadyExists
+            {
+                panic!("{e}")
+            }
+        }
     }
 
     let rt = Runtime::new().unwrap();

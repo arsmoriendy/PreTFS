@@ -37,7 +37,9 @@ impl Test {
     }
 
     pub fn cleanup(bg_sess: BackgroundSession) {
-        bg_sess.join();
+        // INFO: dropping instead of joining leaves behind sqlite shm and wal files, however
+        // joining hangs when creating files (e.g., `let file = create_file("file").unwrap()`)
+        drop(bg_sess);
         cleanup_paths!();
     }
 }

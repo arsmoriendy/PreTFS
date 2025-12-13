@@ -187,6 +187,23 @@ impl HTFS<Sqlite> {
         };
         Ok(())
     }
+
+    /// Delete tag if it has no associated files
+    async fn del_tid_if_orphan(&self, tid: u64) -> Result<(), DBError> {
+        let i64_tid: i64 = tid.try_into()?;
+        let associated_files_amt: u64 =
+            query_scalar("SELECT COUNT() FROM associated_tags WHERE tid = ?")
+                .bind(i64_tid)
+                .fetch_one(&self.pool)
+                .await?;
+        if associated_files_amt == 0 {
+            query("DELETE FROM tags WHERE tid = ?")
+                .bind(i64_tid)
+                .execute(&self.pool)
+                .await?;
+        }
+        Ok(())
+    }
 }
 
 fn has_perm(f_uid: u32, f_gid: u32, f_perm: u16, uid: u32, gid: u32, rwx: u16) -> bool {
